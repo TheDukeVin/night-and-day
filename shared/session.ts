@@ -6,10 +6,12 @@ import { getLevel, LEVEL_COUNT } from './levels.ts';
 import {
   applyPress,
   applyReset,
+  applyUndo,
   canPress,
   initialGameState,
   isBalanced,
   pickHint,
+  undoIndexFor,
 } from './logic.ts';
 import type { ClientMsg, GameState, PlayerRole, ServerMsg } from './types.ts';
 
@@ -39,6 +41,15 @@ export class GameSession {
         const win = isBalanced(level, this.state.presses);
         if (win) this.state = { ...this.state, solved: true };
         return [{ t: 'balance-result', win, state: this.state }];
+      }
+      case 'undo': {
+        if (this.state.solved) return [];
+        // Undoes this player's own most recent press; the other side's presses
+        // are a separate stack and are left untouched.
+        const index = undoIndexFor(level, role, this.state.history);
+        if (index < 0) return [];
+        this.state = applyUndo(this.state, index);
+        return [{ t: 'state', state: this.state }];
       }
       case 'reset': {
         if (this.state.solved) return [];

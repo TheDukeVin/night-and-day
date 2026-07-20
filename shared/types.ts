@@ -30,6 +30,7 @@ export interface LevelDef {
 export interface GameState {
   levelIndex: number; // 1-based index into the pack
   presses: Record<string, number>; // generator id -> press count
+  history: string[]; // generator ids in press order, so the last press can be undone
   resets: number; // resets since last hint was taken (drives answer offer)
   hintTaken: boolean;
   solved: boolean;
@@ -60,6 +61,7 @@ export type ClientMsg =
   | { t: 'begin'; level: number; intro?: boolean }
   | { t: 'press'; gen: string }
   | { t: 'balance' }
+  | { t: 'undo' }
   | { t: 'reset' }
   | { t: 'hint' }
   | { t: 'answer' }

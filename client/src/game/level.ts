@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { getLevel, LEVEL_COUNT } from '../../../shared/levels.ts';
-import { currentCounts, generatorLabel } from '../../../shared/logic.ts';
+import { currentCounts, generatorLabel, undoIndexFor } from '../../../shared/logic.ts';
 import type { GameState, LevelDef, ServerMsg } from '../../../shared/types.ts';
 import type { GameChannel } from '../net/client.ts';
 import { getSettings } from '../settings.ts';
@@ -82,6 +82,7 @@ export class GameController {
     this.hud = new Hud(
       channel.role,
       () => this.requestBalance(),
+      () => this.requestUndo(),
       () => this.requestReset(),
       () => this.quit()
     );
@@ -104,7 +105,7 @@ export class GameController {
     if (introPack !== undefined) this.startIntro(introPack);
 
     this.tutorial.onGameStart();
-    this.loadLevel(startLevel, { presses: {} });
+    this.loadLevel(startLevel, { presses: {}, history: [] });
     this.lastTime = performance.now();
     requestAnimationFrame(this.frame);
   }
@@ -154,7 +155,7 @@ export class GameController {
 
   // ---------- Level lifecycle ----------
 
-  private loadLevel(index: number, state: { presses: Record<string, number> }): void {
+  private loadLevel(index: number, state: { presses: Record<string, number>; history: string[] }): void {
     this.level = getLevel(index);
     this.lastPresses = { ...state.presses };
     this.busy = false;
@@ -170,6 +171,7 @@ export class GameController {
     const counts = currentCounts(this.level, state.presses);
     this.field.setCounts(counts);
     this.hud.setCounts(counts);
+    this.updateUndoAvailability(state.history);
 
     if (this.level.intro) {
       if (this.intro) this.pendingIntroToast = this.level.intro;
@@ -204,6 +206,7 @@ export class GameController {
     const counts = currentCounts(this.level, state.presses);
     this.field?.setCounts(counts, spawnPoints);
     this.hud.setCounts(counts);
+    this.updateUndoAvailability(state.history);
 
     const balanced = Object.values(counts).every((c) => c.day === c.night);
     if (balanced && !state.solved) this.tutorial.onFirstBalanceReady();
@@ -214,11 +217,23 @@ export class GameController {
     }
   }
 
+  /** Undo is offered whenever this player has a press of their own to take back. */
+  private updateUndoAvailability(history: string[]): void {
+    this.hud.setCanUndo(
+      this.level !== null && undoIndexFor(this.level, this.channel.role, history) >= 0
+    );
+  }
+
   // ---------- Player actions ----------
 
   private requestBalance(): void {
     if (this.busy) return;
     this.channel.send({ t: 'balance' });
+  }
+
+  private requestUndo(): void {
+    if (this.busy) return;
+    this.channel.send({ t: 'undo' });
   }
 
   private requestReset(): void {

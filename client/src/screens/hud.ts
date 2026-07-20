@@ -17,11 +17,14 @@ export class Hud {
   private levelLabel: HTMLElement;
   private cells = new Map<CrystalColor, { day: HTMLElement; night: HTMLElement; cell: HTMLElement }>();
   private balanceButton: HTMLButtonElement;
+  private undoButton: HTMLButtonElement;
   private resetButton: HTMLButtonElement;
+  private canUndo = false;
 
   constructor(
     role: PlayerRole,
     private onBalance: () => void,
+    private onUndo: () => void,
     private onReset: () => void,
     onQuit: () => void
   ) {
@@ -36,9 +39,13 @@ export class Hud {
     this.root.append(el('div', { className: 'hud-role', text: ROLE_LABEL[role] }));
 
     this.balanceButton = button('⚖ Balance', () => this.onBalance(), 'menu-btn small balance-btn');
+    this.undoButton = button('↶ Undo', () => this.onUndo(), 'menu-btn small');
+    this.undoButton.disabled = true;
     this.resetButton = button('↺ Reset', () => this.onReset(), 'menu-btn small');
     const quitButton = button('✕ Quit', onQuit, 'menu-btn small');
-    this.root.append(el('div', { className: 'hud-bottom' }, [this.balanceButton, this.resetButton, quitButton]));
+    this.root.append(
+      el('div', { className: 'hud-bottom' }, [this.balanceButton, this.undoButton, this.resetButton, quitButton])
+    );
   }
 
   setLevel(level: LevelDef): void {
@@ -66,8 +73,15 @@ export class Hud {
     }
   }
 
+  /** Enable Undo only when there is a press to take back. */
+  setCanUndo(canUndo: boolean): void {
+    this.canUndo = canUndo;
+    this.undoButton.disabled = !canUndo || this.balanceButton.disabled;
+  }
+
   setBusy(busy: boolean): void {
     this.balanceButton.disabled = busy;
     this.resetButton.disabled = busy;
+    this.undoButton.disabled = busy || !this.canUndo;
   }
 }
