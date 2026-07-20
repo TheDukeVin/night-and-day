@@ -6,8 +6,9 @@ import { GameController } from './game/level.ts';
 import { LoopbackChannel, SocketChannel, type GameChannel } from './net/client.ts';
 import { LEVEL_COUNT, STARTER_LEVELS, STARTER_PACK_ID, STARTER_PACK_NAME } from '../../shared/levels.ts';
 import type { ServerMsg } from '../../shared/types.ts';
-import { getSettings, saveSettings } from './settings.ts';
 import { button, clearUI, el, showDialog, uiRoot } from './screens/ui.ts';
+import { buildSettingsPanel } from './screens/settingsPanel.ts';
+import { mountCornerControls } from './screens/cornerControls.ts';
 import { getCurrentUser, login, logout, register } from './net/auth.ts';
 import type { AuthUser } from '../../shared/authTypes.ts';
 import {
@@ -306,50 +307,11 @@ function startGame(channel: GameChannel, startLevel: number, playIntro = false):
 // ---------- Settings & credits ----------
 
 function showSettings(): void {
-  const settings = getSettings();
-  const panel = el('div', { className: 'settings-panel' });
-
-  const sens = el('input') as HTMLInputElement;
-  sens.type = 'range';
-  sens.min = '0.3';
-  sens.max = '2';
-  sens.step = '0.1';
-  sens.value = String(settings.mouseSensitivity);
-  sens.addEventListener('input', () => saveSettings({ mouseSensitivity: Number(sens.value) }));
-  panel.append(el('div', { className: 'settings-row' }, [el('span', { text: 'Mouse sensitivity' }), sens]));
-
-  const lookMode = el('input') as HTMLInputElement;
-  lookMode.type = 'checkbox';
-  lookMode.checked = settings.cameraMode === 'pointerlock';
-  lookMode.addEventListener('change', () =>
-    saveSettings({ cameraMode: lookMode.checked ? 'pointerlock' : 'drag' })
-  );
-  panel.append(
-    el('div', { className: 'settings-row' }, [el('span', { text: 'Mouse-look (click to lock cursor)' }), lookMode])
-  );
-  panel.append(
-    el('div', {
-      className: 'settings-hint',
-      text: 'Off: hold right mouse button and drag to look around. On: click the game to lock your cursor and look around freely — press Esc to let go.',
-    })
-  );
-
-  const quality = el('input') as HTMLInputElement;
-  quality.type = 'checkbox';
-  quality.checked = settings.quality === 'high';
-  quality.addEventListener('change', () => saveSettings({ quality: quality.checked ? 'high' : 'low' }));
-  panel.append(el('div', { className: 'settings-row' }, [el('span', { text: 'High quality graphics' }), quality]));
-
-  const tut = el('input') as HTMLInputElement;
-  tut.type = 'checkbox';
-  tut.checked = settings.showTutorials;
-  tut.addEventListener('change', () => saveSettings({ showTutorials: tut.checked }));
-  panel.append(el('div', { className: 'settings-row' }, [el('span', { text: 'Show tutorial tips' }), tut]));
-
-  const resetTut = button('Replay tutorial tips', () => localStorage.removeItem('night-and-day-tutorials-seen'), 'menu-btn small');
-  panel.append(el('div', { className: 'settings-row' }, [resetTut]));
-
-  screen([el('h2', { text: 'Settings' }), panel, button('← Back', showTitle, 'menu-btn small back-link')]);
+  screen([
+    el('h2', { text: 'Settings' }),
+    buildSettingsPanel(),
+    button('← Back', showTitle, 'menu-btn small back-link'),
+  ]);
 }
 
 function showCredits(): void {
@@ -365,6 +327,8 @@ function showCredits(): void {
     button('← Back', showTitle, 'menu-btn small back-link'),
   ]);
 }
+
+mountCornerControls();
 
 getCurrentUser().then(async (user) => {
   currentUser = user;

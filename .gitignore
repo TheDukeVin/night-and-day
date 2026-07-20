@@ -3,5 +3,6 @@ client/dist/
 .DS_Store
 .Rhistory
 .claude/settings.local.json
+.claude/worktrees/
 .env
 server/data/
