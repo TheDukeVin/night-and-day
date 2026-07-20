@@ -54,14 +54,18 @@ export interface PlayerPose {
 export type ClientMsg =
   | { t: 'create'; room: string }
   | { t: 'join'; room: string }
-  | { t: 'begin'; level: number } // host starts the game (at the level they chose) once both players present
+  // Host starts the game (at the level they chose) once both players present.
+  // `intro` asks both clients to play the pack cutscene — the host sets it when
+  // either player is new to the pack.
+  | { t: 'begin'; level: number; intro?: boolean }
   | { t: 'press'; gen: string }
   | { t: 'balance' }
   | { t: 'reset' }
   | { t: 'hint' }
   | { t: 'answer' }
   | { t: 'next' } // advance after a win
-  | { t: 'pose'; pose: PlayerPose };
+  | { t: 'pose'; pose: PlayerPose }
+  | { t: 'unlocked'; levels: number[] }; // share this client's unlocked levels with the peer
 
 /** Server -> client */
 export type ServerMsg =
@@ -69,11 +73,12 @@ export type ServerMsg =
   | { t: 'joined'; room: string; role: PlayerRole }
   | { t: 'peer-joined' }
   | { t: 'peer-left' }
-  | { t: 'begin'; level: number }
+  | { t: 'begin'; level: number; intro?: boolean }
   | { t: 'state'; state: GameState }
   | { t: 'balance-result'; win: boolean; state: GameState }
   | { t: 'hint'; gen: string; presses: number }
   | { t: 'answer'; solution: Record<string, number> }
   | { t: 'offer-answer' }
   | { t: 'pose'; pose: PlayerPose }
+  | { t: 'unlocked'; levels: number[] }
   | { t: 'error'; message: string };

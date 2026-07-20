@@ -19,6 +19,7 @@ import {
   handleMe,
   handleRegister,
 } from './auth.ts';
+import { handleCompleteLevel, handleGetProgress } from './progress.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
 const DIST = join(fileURLToPath(new URL('.', import.meta.url)), '../client/dist');
@@ -52,6 +53,19 @@ const httpServer = createServer(async (req, res) => {
     if (method === 'GET' && url === '/auth/me') return handleMe(req, res);
     if (method === 'GET' && url === '/auth/google/start') return handleGoogleStart(req, res);
     if (method === 'GET' && url === '/auth/google/callback') return handleGoogleCallback(req, res);
+    res.writeHead(404);
+    return res.end('Not found');
+  }
+
+  if (url === '/progress') {
+    const method = req.method ?? 'GET';
+    if (method === 'GET') return handleGetProgress(req, res);
+    res.writeHead(404);
+    return res.end('Not found');
+  }
+  if (url === '/progress/complete') {
+    const method = req.method ?? 'GET';
+    if (method === 'POST') return handleCompleteLevel(req, res);
     res.writeHead(404);
     return res.end('Not found');
   }
@@ -126,12 +140,16 @@ wss.on('connection', (ws) => {
         if (!room || room.players.size < 2 || role !== 'day') return;
         room.session.startLevel(msg.level);
         room.started = true;
-        broadcast(room, { t: 'begin', level: room.session.state.levelIndex });
+        broadcast(room, { t: 'begin', level: room.session.state.levelIndex, intro: msg.intro });
         broadcast(room, { t: 'state', state: room.session.state });
         break;
       }
       case 'pose': {
         if (room) broadcast(room, { t: 'pose', pose: msg.pose }, ws);
+        break;
+      }
+      case 'unlocked': {
+        if (room) broadcast(room, { t: 'unlocked', levels: msg.levels }, ws);
         break;
       }
       default: {

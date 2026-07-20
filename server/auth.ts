@@ -41,14 +41,14 @@ function serializeCookie(name: string, value: string, maxAgeSeconds: number): st
   return parts.join('; ');
 }
 
-async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
+export async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(chunk as Buffer);
   const raw = Buffer.concat(chunks).toString('utf8');
   return raw ? (JSON.parse(raw) as T) : ({} as T);
 }
 
-function respondJson(res: ServerResponse, status: number, body: unknown, cookies: string[] = []): void {
+export function respondJson(res: ServerResponse, status: number, body: unknown, cookies: string[] = []): void {
   if (cookies.length) res.setHeader('Set-Cookie', cookies);
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(body));
@@ -89,7 +89,7 @@ function toAuthUser(row: UserRow): AuthUser {
   };
 }
 
-function getSessionUser(req: IncomingMessage): UserRow | undefined {
+export function getSessionUser(req: IncomingMessage): UserRow | undefined {
   const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
   if (!token) return undefined;
   return getUserBySessionToken(token);

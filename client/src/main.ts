@@ -4,12 +4,20 @@
 import './style.css';
 import { GameController } from './game/level.ts';
 import { LoopbackChannel, SocketChannel, type GameChannel } from './net/client.ts';
-import { STARTER_LEVELS } from '../../shared/levels.ts';
+import { LEVEL_COUNT, STARTER_LEVELS, STARTER_PACK_ID, STARTER_PACK_NAME } from '../../shared/levels.ts';
 import type { ServerMsg } from '../../shared/types.ts';
 import { getSettings, saveSettings } from './settings.ts';
 import { button, clearUI, el, showDialog, uiRoot } from './screens/ui.ts';
 import { getCurrentUser, login, logout, register } from './net/auth.ts';
 import type { AuthUser } from '../../shared/authTypes.ts';
+import {
+  configureProgress,
+  getUnlockedLevels,
+  isNewFromUnlocked,
+  isNewToPack,
+  markLevelComplete,
+  unionUnlocked,
+} from './progress.ts';
 
 let game: GameController | null = null;
 let currentUser: AuthUser | null = null;
@@ -30,6 +38,7 @@ function showTitle(): void {
       async () => {
         if (currentUser) await logout();
         currentUser = null;
+        await configureProgress(currentUser);
         showAuth();
       },
       'menu-btn small'
@@ -58,8 +67,9 @@ function confirmGuest(): void {
       { label: 'Cancel', onClick: () => {}, className: 'menu-btn small back-link' },
       {
         label: 'Continue as Guest',
-        onClick: () => {
+        onClick: async () => {
           currentUser = null;
+          await configureProgress(currentUser);
           showTitle();
         },
       },
@@ -85,6 +95,7 @@ function showAuth(mode: 'login' | 'register' = 'login'): void {
       return;
     }
     currentUser = result.user ?? null;
+    await configureProgress(currentUser);
     showTitle();
   };
   password.addEventListener('keydown', (e) => e.key === 'Enter' && go());
@@ -140,7 +151,9 @@ function showPackSelect(): void {
 function showModeSelect(): void {
   screen([
     el('h2', { text: 'How do you want to play?' }),
-    button('🌗 Single Player', () => showLevelSelect(startSinglePlayer, showModeSelect)),
+    button('🌗 Single Player', () =>
+      showLevelSelect(startSinglePlayer, showModeSelect, getUnlockedLevels(STARTER_PACK_ID, LEVEL_COUNT))
+    ),
     button('☀🌙 Two Players', showRoomChoice),
     button('← Back', showPackSelect, 'menu-btn small back-link'),
   ]);
@@ -148,30 +161,40 @@ function showModeSelect(): void {
 
 // ---------- Level selection ----------
 
-function showLevelSelect(onPick: (level: number) => void, onBack: () => void): void {
-  const grid = el('div', { className: 'level-grid' });
+function levelGrid(onPick: (level: number) => void, unlocked: Set<number>): HTMLDivElement {
+  const grid = el('div', { className: 'level-grid' }) as HTMLDivElement;
   for (const level of STARTER_LEVELS) {
-    const card = el('button', { className: 'level-card' }, [
+    const isUnlocked = unlocked.has(level.index);
+    const card = el('button', { className: isUnlocked ? 'level-card' : 'level-card locked' }, [
       el('div', { className: 'level-num', text: String(level.index) }),
-      el('div', { className: 'level-name', text: level.name }),
+      el('div', { className: 'level-name', text: isUnlocked ? level.name : '🔒' }),
     ]);
-    card.addEventListener('click', () => onPick(level.index));
+    card.disabled = !isUnlocked;
+    if (isUnlocked) card.addEventListener('click', () => onPick(level.index));
     grid.append(card);
   }
-  screen([el('h2', { text: 'Choose a Level' }), grid, button('← Back', onBack, 'menu-btn small back-link')]);
+  return grid;
+}
+
+function showLevelSelect(onPick: (level: number) => void, onBack: () => void, unlocked: Set<number>): void {
+  screen([
+    el('h2', { text: 'Choose a Level' }),
+    levelGrid(onPick, unlocked),
+    button('← Back', onBack, 'menu-btn small back-link'),
+  ]);
 }
 
 function showRoomChoice(): void {
   screen([
     el('h2', { text: 'Two Player' }),
     el('div', { className: 'subtitle', text: 'One of you creates a room, the other joins it by name.' }),
-    button('Create a Room', () => showLevelSelect((level) => showRoomForm('create', level), showRoomChoice)),
-    button('Join a Room', () => showRoomForm('join', 1)),
+    button('Create a Room', () => showRoomForm('create')),
+    button('Join a Room', () => showRoomForm('join')),
     button('← Back', showModeSelect, 'menu-btn small back-link'),
   ]);
 }
 
-function showRoomForm(kind: 'create' | 'join', level: number): void {
+function showRoomForm(kind: 'create' | 'join'): void {
   const input = el('input', { className: 'text-input' }) as HTMLInputElement;
   input.placeholder = kind === 'create' ? 'Name your room…' : 'Enter the room name…';
   input.maxLength = 24;
@@ -182,7 +205,7 @@ function showRoomForm(kind: 'create' | 'join', level: number): void {
       error.textContent = 'Please enter a room name.';
       return;
     }
-    startTwoPlayer(kind, room, level, (message) => (error.textContent = message));
+    startTwoPlayer(kind, room, (message) => (error.textContent = message));
   };
   input.addEventListener('keydown', (e) => e.key === 'Enter' && go());
   screen([
@@ -195,48 +218,55 @@ function showRoomForm(kind: 'create' | 'join', level: number): void {
   input.focus();
 }
 
-function showLobby(room: string, isHost: boolean, level: number, channel: SocketChannel): void {
+function showLobby(room: string, isHost: boolean, channel: SocketChannel): void {
   const status = el('div', {
     className: 'subtitle',
-    text: isHost ? 'Waiting for a friend to join…' : 'Waiting for the host to begin…',
+    text: isHost ? 'Waiting for a friend to join…' : 'Waiting for the host to choose a level…',
   });
-  const beginButton = button('Begin!', () => channel.send({ t: 'begin', level }));
-  beginButton.style.display = 'none';
+  const levelArea = el('div', { className: 'lobby-level-area' });
   const leave = () => {
     channel.close();
     showRoomChoice();
   };
-  const levelName = STARTER_LEVELS.find((l) => l.index === level)?.name ?? '';
   screen([
     el('h2', { text: `Room: ${room}` }),
     el('div', { className: 'subtitle', text: `You are ${channel.role === 'day' ? 'Day ☀' : 'Night 🌙'}` }),
-    ...(isHost ? [el('div', { className: 'subtitle', text: `Level ${level}: ${levelName}` })] : []),
     status,
-    beginButton,
+    levelArea,
     button('← Leave', leave, 'menu-btn small back-link'),
   ]);
 
+  if (!isHost) {
+    channel.send({ t: 'unlocked', levels: [...getUnlockedLevels(STARTER_PACK_ID, LEVEL_COUNT)] });
+  }
+
   channel.onMessage = (msg: ServerMsg) => {
     if (msg.t === 'peer-joined') {
-      status.textContent = isHost ? 'Your friend is here!' : status.textContent;
-      if (isHost) beginButton.style.display = '';
+      if (isHost) status.textContent = 'Your friend is here — waiting for their progress…';
+    } else if (msg.t === 'unlocked') {
+      if (!isHost) return;
+      status.textContent = 'Choose a level:';
+      const union = new Set(unionUnlocked(getUnlockedLevels(STARTER_PACK_ID, LEVEL_COUNT), msg.levels));
+      // Welcome the pair into the pack if it is new to either of them.
+      const intro = isNewToPack(STARTER_PACK_ID) || isNewFromUnlocked(msg.levels);
+      levelArea.replaceChildren(levelGrid((level) => channel.send({ t: 'begin', level, intro }), union));
     } else if (msg.t === 'begin') {
-      startGame(channel, msg.level);
+      startGame(channel, msg.level, msg.intro === true);
     } else if (msg.t === 'peer-left') {
       status.textContent = 'The other player left…';
-      beginButton.style.display = 'none';
+      levelArea.replaceChildren();
     } else if (msg.t === 'error') {
       status.textContent = msg.message;
     }
   };
 }
 
-function startTwoPlayer(kind: 'create' | 'join', room: string, level: number, onError: (m: string) => void): void {
+function startTwoPlayer(kind: 'create' | 'join', room: string, onError: (m: string) => void): void {
   const channel = new SocketChannel(onError);
   channel.onMessage = (msg: ServerMsg) => {
-    if (msg.t === 'created') showLobby(room, true, level, channel);
+    if (msg.t === 'created') showLobby(room, true, channel);
     else if (msg.t === 'joined') {
-      showLobby(room, false, level, channel);
+      showLobby(room, false, channel);
       // Joiner arrives with the peer (host) already present.
     } else if (msg.t === 'error') {
       channel.close();
@@ -247,7 +277,7 @@ function startTwoPlayer(kind: 'create' | 'join', room: string, level: number, on
 }
 
 function startSinglePlayer(level: number): void {
-  startGame(new LoopbackChannel(level), level);
+  startGame(new LoopbackChannel(level), level, isNewToPack(STARTER_PACK_ID));
 }
 
 function enterFullscreen(): void {
@@ -257,7 +287,7 @@ function enterFullscreen(): void {
   document.documentElement.requestFullscreen?.().catch(() => {});
 }
 
-function startGame(channel: GameChannel, startLevel: number): void {
+function startGame(channel: GameChannel, startLevel: number, playIntro = false): void {
   clearUI();
   game?.dispose();
   enterFullscreen();
@@ -267,7 +297,9 @@ function startGame(channel: GameChannel, startLevel: number): void {
       game = null;
       showTitle();
     },
-    startLevel
+    startLevel,
+    (levelIndex) => markLevelComplete(STARTER_PACK_ID, levelIndex),
+    playIntro ? STARTER_PACK_NAME : undefined
   );
 }
 
@@ -334,8 +366,9 @@ function showCredits(): void {
   ]);
 }
 
-getCurrentUser().then((user) => {
+getCurrentUser().then(async (user) => {
   currentUser = user;
+  await configureProgress(currentUser);
   if (user) showTitle();
   else showAuth();
 });

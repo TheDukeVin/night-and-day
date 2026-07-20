@@ -104,7 +104,8 @@ export function makeCrystalMesh(color: CrystalColor, side: Side): THREE.Group {
 }
 
 let haloTex: THREE.CanvasTexture | null = null;
-function haloTexture(): THREE.CanvasTexture {
+/** Soft radial glow, shared by crystal halos and burst sparks. */
+export function haloTexture(): THREE.CanvasTexture {
   if (haloTex) return haloTex;
   const c = document.createElement('canvas');
   c.width = 64;

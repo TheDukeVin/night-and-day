@@ -11,6 +11,9 @@ export default defineConfig({
       '/auth': {
         target: 'http://localhost:8787',
       },
+      '/progress': {
+        target: 'http://localhost:8787',
+      },
     },
   },
   build: {
