@@ -185,9 +185,13 @@ body {
   color: var(--text);
   font-family: inherit;
 }
-.level-card:hover {
+.level-card:hover:not(:disabled) {
   transform: scale(1.05);
   box-shadow: 0 0 18px rgba(255, 199, 118, 0.4);
+}
+.level-card:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 .level-card .level-num {
   font-size: 26px;

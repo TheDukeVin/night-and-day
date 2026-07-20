@@ -61,7 +61,8 @@ export type ClientMsg =
   | { t: 'hint' }
   | { t: 'answer' }
   | { t: 'next' } // advance after a win
-  | { t: 'pose'; pose: PlayerPose };
+  | { t: 'pose'; pose: PlayerPose }
+  | { t: 'unlocked'; levels: number[] }; // share this client's unlocked levels with the peer
 
 /** Server -> client */
 export type ServerMsg =
@@ -76,4 +77,5 @@ export type ServerMsg =
   | { t: 'answer'; solution: Record<string, number> }
   | { t: 'offer-answer' }
   | { t: 'pose'; pose: PlayerPose }
+  | { t: 'unlocked'; levels: number[] }
   | { t: 'error'; message: string };

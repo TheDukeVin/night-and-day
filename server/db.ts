@@ -26,6 +26,13 @@ db.exec(`
     user_id INTEGER NOT NULL REFERENCES users(id),
     created_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS progress (
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    pack_id TEXT NOT NULL,
+    level_index INTEGER NOT NULL,
+    completed_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, pack_id, level_index)
+  );
 `);
 
 export interface UserRow {
@@ -77,4 +84,21 @@ export function getUserBySessionToken(token: string): UserRow | undefined {
 
 export function deleteSession(token: string): void {
   db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+}
+
+export function getCompletedLevels(userId: number): Record<string, number[]> {
+  const rows = db
+    .prepare('SELECT pack_id, level_index FROM progress WHERE user_id = ?')
+    .all(userId) as { pack_id: string; level_index: number }[];
+  const out: Record<string, number[]> = {};
+  for (const row of rows) {
+    (out[row.pack_id] ??= []).push(row.level_index);
+  }
+  return out;
+}
+
+export function markLevelComplete(userId: number, packId: string, levelIndex: number): void {
+  db.prepare(
+    'INSERT OR IGNORE INTO progress (user_id, pack_id, level_index, completed_at) VALUES (?, ?, ?, ?)'
+  ).run(userId, packId, levelIndex, new Date().toISOString());
 }

@@ -258,3 +258,6 @@ export function getLevel(index: number): LevelDef {
 }
 
 export const LEVEL_COUNT = STARTER_LEVELS.length;
+
+/** Pack id used to key unlock progress; free-form for future packs. */
+export const STARTER_PACK_ID = 'starter';

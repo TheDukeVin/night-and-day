@@ -45,7 +45,8 @@ export class GameController {
   constructor(
     private channel: GameChannel,
     private onQuit: () => void,
-    startLevel = 1
+    startLevel = 1,
+    private onLevelComplete?: (levelIndex: number) => void
   ) {
     const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: getSettings().quality === 'high' });
@@ -253,6 +254,7 @@ export class GameController {
           this.busy = false;
           this.hud.setBusy(false);
           if (msg.win) {
+            this.onLevelComplete?.(level.index);
             this.showWinDialog(level);
           } else {
             // Crystals return to their original positions; play continues.
