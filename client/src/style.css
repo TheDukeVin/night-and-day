@@ -487,3 +487,275 @@ body {
 .intro-skip:hover {
   opacity: 1;
 }
+
+/* ---------- First-time guides (guides.ts) ---------- */
+
+/* Selector matches `#ui-root > *`'s specificity so the overlay really does let
+   clicks through to the HUD and the canvas underneath. */
+#ui-root > .guides {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.guide-card {
+  position: absolute;
+  pointer-events: none;
+  animation: guide-in 0.4s ease both;
+}
+@keyframes guide-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+}
+
+/* Retiring a guide: it swells and fades, so finishing feels earned. */
+.guide-card.guide-complete {
+  animation: guide-out 0.45s ease forwards;
+}
+@keyframes guide-out {
+  to {
+    opacity: 0;
+    transform: scale(1.35);
+  }
+}
+
+.guide-card.hidden {
+  opacity: 0;
+}
+
+/* --- Movement + look: bottom-right corner, clear of the centered toast and
+       the centered HUD button row --- */
+
+.guide-move,
+.guide-look {
+  bottom: 86px;
+  right: 34px;
+}
+
+.keycaps {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.keyrow {
+  display: flex;
+  gap: 6px;
+}
+
+.keycap {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: bold;
+  color: var(--text);
+  background: var(--panel);
+  border: 2px solid var(--panel-border);
+  border-radius: 10px;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35);
+  animation: keycap-nudge 1.6s ease-in-out infinite;
+  transition: transform 0.08s ease, background 0.2s ease, border-color 0.2s ease;
+}
+.keycap.wide {
+  width: 140px;
+}
+
+/* Unused keys breathe to invite a try; each row offsets so it reads as a wave. */
+@keyframes keycap-nudge {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+.keyrow:nth-child(2) .keycap:nth-child(2) {
+  animation-delay: 0.12s;
+}
+.keyrow:nth-child(2) .keycap:nth-child(3) {
+  animation-delay: 0.24s;
+}
+.keyrow:nth-child(3) .keycap {
+  animation-delay: 0.36s;
+}
+
+/* Pressed right now. */
+.keycap.held {
+  transform: translateY(3px) scale(0.94);
+  background: var(--day);
+  color: #2b1b4d;
+  border-color: var(--text);
+  animation: none;
+}
+
+/* Already tried: settles down and stops asking for attention. */
+.keycap.done {
+  animation: none;
+  opacity: 0.5;
+  border-color: rgba(157, 255, 176, 0.8);
+  box-shadow: 0 0 10px rgba(157, 255, 176, 0.35);
+}
+.keycap.done.held {
+  opacity: 1;
+}
+
+/* --- Mouse look --- */
+
+.mouse-svg {
+  width: 108px;
+  height: 156px;
+  overflow: visible;
+  filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.45));
+}
+.mouse-svg .shell {
+  fill: var(--panel);
+  stroke: var(--panel-border);
+  stroke-width: 2.5;
+}
+.mouse-svg .btn {
+  fill: transparent;
+}
+.mouse-svg .split {
+  stroke: var(--panel-border);
+  stroke-width: 2;
+}
+
+/* The button to hold blinks; pointer-lock mode calls out the left one instead. */
+.mouse-svg .right {
+  fill: var(--day);
+  animation: guide-blink 1.4s ease-in-out infinite;
+}
+.guide-look.locking .mouse-svg .right {
+  fill: transparent;
+  animation: none;
+}
+.guide-look.locking .mouse-svg .left {
+  fill: var(--day);
+  animation: guide-blink 1.4s ease-in-out infinite;
+}
+@keyframes guide-blink {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Double arrow above the mouse, sliding side to side: the drag it wants. */
+.mouse-svg .drag-arrow line {
+  stroke: var(--text);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+.mouse-svg .drag-arrow path {
+  fill: var(--text);
+}
+.mouse-svg .drag-arrow {
+  animation: drag-swing 2s ease-in-out infinite;
+}
+@keyframes drag-swing {
+  0%,
+  100% {
+    transform: translateX(-5px);
+  }
+  50% {
+    transform: translateX(5px);
+  }
+}
+
+/* --- Press a generator: anchored over the pedestal --- */
+
+.guide-press {
+  transform: translate(-50%, -50%);
+  transition: opacity 0.25s ease;
+}
+.guide-press .guide-ring {
+  width: 96px;
+  height: 96px;
+  margin: -48px 0 0 -48px;
+  border: 3px solid var(--day);
+  border-radius: 50%;
+  box-shadow: 0 0 18px rgba(255, 199, 118, 0.6);
+  animation: ring-pulse 1.5s ease-out infinite;
+}
+@keyframes ring-pulse {
+  0% {
+    transform: scale(0.55);
+    opacity: 0;
+  }
+  35% {
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.15);
+    opacity: 0;
+  }
+}
+.guide-press .guide-hand {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: 40px;
+  margin: -14px 0 0 -20px;
+  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.5));
+  animation: hand-tap 1.5s ease-in-out infinite;
+}
+@keyframes hand-tap {
+  0%,
+  100% {
+    transform: translateY(-14px);
+  }
+  45% {
+    transform: translateY(2px);
+  }
+}
+
+/* --- Balance: arrow bouncing onto the button --- */
+
+.guide-balance {
+  transform: translate(-50%, -100%);
+}
+.guide-balance .guide-arrow {
+  font-size: 30px;
+  color: var(--day);
+  text-shadow: 0 0 14px rgba(255, 199, 118, 0.9);
+  animation: arrow-bounce 0.9s ease-in-out infinite;
+}
+@keyframes arrow-bounce {
+  0%,
+  100% {
+    transform: translateY(-8px);
+  }
+  50% {
+    transform: translateY(0);
+  }
+}
+
+/* The Balance button itself glows while its guide is up. */
+.balance-btn.guide-lit {
+  animation: balance-glow 1.2s ease-in-out infinite;
+}
+@keyframes balance-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 243, 226, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 14px rgba(255, 243, 226, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guides * {
+    animation-duration: 0.001s !important;
+    animation-iteration-count: 1 !important;
+  }
+}
