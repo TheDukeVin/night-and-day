@@ -71,6 +71,7 @@ export class Player {
   private keys = new Set<string>();
   private cameraYaw = 0;
   private cameraPitch = 0.42;
+  private cameraDist = 9;
   private bobTime = 0;
   private dragging = false;
   private jumpOffset = 0;
@@ -93,6 +94,8 @@ export class Player {
     window.addEventListener('mouseup', this.onMouseUp);
     window.addEventListener('mousemove', this.onMouseMove);
     window.addEventListener('blur', this.onBlur);
+    domElement.addEventListener('contextmenu', this.onContextMenu);
+    domElement.addEventListener('wheel', this.onWheel, { passive: false });
   }
 
   dispose(): void {
@@ -102,6 +105,9 @@ export class Player {
     window.removeEventListener('mouseup', this.onMouseUp);
     window.removeEventListener('mousemove', this.onMouseMove);
     window.removeEventListener('blur', this.onBlur);
+    this.domElement.removeEventListener('contextmenu', this.onContextMenu);
+    this.domElement.removeEventListener('wheel', this.onWheel);
+    if (document.pointerLockElement === this.domElement) document.exitPointerLock();
   }
 
   private onKeyDown = (e: KeyboardEvent) => {
@@ -119,14 +125,26 @@ export class Player {
   private onKeyUp = (e: KeyboardEvent) => this.keys.delete(e.code);
   private onBlur = () => this.keys.clear();
   private onMouseDown = (e: MouseEvent) => {
-    if (e.button === 0 && this.controlsEnabled) this.dragging = true;
+    if (!this.controlsEnabled) return;
+    const mode = getSettings().cameraMode;
+    if (mode === 'drag' && e.button === 2) {
+      this.dragging = true;
+    } else if (mode === 'pointerlock' && e.button === 0 && document.pointerLockElement !== this.domElement) {
+      this.domElement.requestPointerLock()?.catch(() => {});
+    }
   };
   private onMouseUp = () => (this.dragging = false);
   private onMouseMove = (e: MouseEvent) => {
-    if (!this.dragging) return;
+    const locked = document.pointerLockElement === this.domElement;
+    if (!this.dragging && !locked) return;
     const sens = getSettings().mouseSensitivity;
     this.cameraYaw -= e.movementX * 0.0045 * sens;
     this.cameraPitch = THREE.MathUtils.clamp(this.cameraPitch + e.movementY * 0.003 * sens, 0.08, 1.15);
+  };
+  private onContextMenu = (e: MouseEvent) => e.preventDefault();
+  private onWheel = (e: WheelEvent) => {
+    e.preventDefault();
+    this.cameraDist = THREE.MathUtils.clamp(this.cameraDist + e.deltaY * 0.01, 4, 22);
   };
 
   update(dt: number): void {
@@ -180,7 +198,7 @@ export class Player {
 
   /** Where the chase camera wants to be right now, without moving it there. */
   cameraPose(): { pos: THREE.Vector3; look: THREE.Vector3 } {
-    const dist = 9;
+    const dist = this.cameraDist;
     const p = this.mesh.position;
     const cx = p.x + Math.sin(this.cameraYaw) * Math.cos(this.cameraPitch) * dist;
     const cz = p.z + Math.cos(this.cameraYaw) * Math.cos(this.cameraPitch) * dist;
