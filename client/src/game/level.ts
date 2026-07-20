@@ -414,7 +414,7 @@ export class GameController {
     this.player.update(dt);
     this.remote?.update(dt);
     this.field?.update(dt);
-    for (const stand of this.stands) stand.update(dt);
+    for (const stand of this.stands) stand.update(dt, this.camera);
     this.intro?.update();
     this.updateHover();
     updateTweens(dt);

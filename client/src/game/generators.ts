@@ -13,6 +13,10 @@ import { tween } from './anim.ts';
 const SCAFFOLD_GEO = new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(CRYSTAL_RADIUS, 0));
 const HULL_GEO = new THREE.IcosahedronGeometry(CRYSTAL_RADIUS, 0);
 
+// Scratch vectors for the per-frame sky test, so it allocates nothing.
+const SKY_TMP = new THREE.Vector3();
+const SKY_TMP2 = new THREE.Vector3();
+
 export class GeneratorStand {
   readonly root = new THREE.Group();
   readonly def: GeneratorDef;
@@ -22,6 +26,8 @@ export class GeneratorStand {
   private ring: THREE.Mesh;
   private outline = new THREE.Group();
   private time = Math.random() * 10;
+  /** Day-side cage edges, re-tinted each frame by how bright the sky behind is. */
+  private dayScaffolds: THREE.LineSegments[] = [];
 
   constructor(def: GeneratorDef, position: THREE.Vector3) {
     this.def = def;
@@ -78,14 +84,39 @@ export class GeneratorStand {
     const n = crownColors.length;
     const spacing = n <= 4 ? 1.2 : 4.8 / (n - 1);
     crownColors.forEach((color, i) => {
-      const hex = COLOR_HEX[color][def.side];
+      // The crown reads against whatever sky is behind it, so it never uses the
+      // dark night tint: bright edges over a dark silhouette stay legible on
+      // both the warm day sky and the night one.
+      const hex = COLOR_HEX[color].day;
       const slot = new THREE.Group();
       slot.position.x = n === 1 ? 0 : (i - (n - 1) / 2) * spacing;
-      const scaffold = new THREE.LineSegments(
-        SCAFFOLD_GEO,
-        new THREE.LineBasicMaterial({ color: hex, transparent: true, opacity: isDay ? 0.95 : 0.8 })
-      );
+      // Night cages sit against dark scenery, so a flat dark silhouette behind
+      // the edges is what makes them read. Day cages stay bare wireframe — the
+      // empty middle is what distinguishes a template from a real crystal — and
+      // get their contrast from `shadeCrownForSky` instead.
+      if (!isDay) {
+        const silhouette = new THREE.Mesh(
+          HULL_GEO,
+          new THREE.MeshBasicMaterial({
+            color: 0x14172e,
+            transparent: true,
+            opacity: 0.45,
+            depthWrite: false,
+          })
+        );
+        silhouette.scale.setScalar(0.98);
+        slot.add(silhouette);
+      }
+      const scaffoldMat = new THREE.LineBasicMaterial({ color: hex });
+      const scaffold = new THREE.LineSegments(SCAFFOLD_GEO, scaffoldMat);
       slot.add(scaffold);
+      if (isDay) {
+        // Same hue, deeper and more saturated: still obviously "the red cage",
+        // but dark enough to hold its own against the sky.
+        scaffoldMat.userData.baseColor = scaffoldMat.color.clone();
+        scaffoldMat.userData.skyColor = scaffoldMat.color.clone().offsetHSL(0, 0.12, -0.34);
+        this.dayScaffolds.push(scaffold);
+      }
       // Lines are hard to hit with a raycast, so click the invisible hull.
       const hull = new THREE.Mesh(
         HULL_GEO,
@@ -99,8 +130,11 @@ export class GeneratorStand {
     this.root.add(this.crown);
 
     // Sign showing the output, e.g. "+2 ◆  +1 ◆". Clicking it presses too.
+    // It hangs off the pedestal's front face rather than floating overhead:
+    // generators stand on the platform's front edge, so anything above them
+    // covers the crystal clusters behind when you look at the scene head-on.
     const sign = makeSignSprite(def);
-    sign.position.y = 4.4;
+    sign.position.set(0, 1.15, 2.1);
     this.root.add(sign);
     this.clickTargets.push(sign);
 
@@ -155,8 +189,30 @@ export class GeneratorStand {
     tween({ duration: 0.5, onUpdate: () => {}, onDone: () => mat.color.setHex(original) });
   }
 
-  update(dt: number): void {
+  /**
+   * Day cages lose their bright pastel against the sky, so darken the edges as
+   * the crown drifts up in front of it. "Against sky" is judged by the pitch of
+   * the camera→crown ray: looking level or up means open sky behind, looking
+   * down means the darker platform and terrain. The band is wide enough that
+   * walking around a generator fades between the two rather than snapping.
+   */
+  private shadeCrownForSky(camera: THREE.Camera): void {
+    if (this.dayScaffolds.length === 0) return;
+    const crown = this.crown.getWorldPosition(SKY_TMP).sub(camera.getWorldPosition(SKY_TMP2));
+    const pitch = crown.y / (crown.length() || 1);
+    // 0 below the horizon (dark scenery behind) → 1 well above it (bright sky).
+    const t = THREE.MathUtils.smoothstep(pitch, -0.05, 0.18);
+    for (const scaffold of this.dayScaffolds) {
+      const mat = scaffold.material as THREE.LineBasicMaterial;
+      const base = mat.userData.baseColor as THREE.Color;
+      const deep = mat.userData.skyColor as THREE.Color;
+      mat.color.copy(base).lerp(deep, t);
+    }
+  }
+
+  update(dt: number, camera?: THREE.Camera): void {
     this.time += dt;
+    if (camera) this.shadeCrownForSky(camera);
     this.crown.rotation.y += dt * 0.9;
     this.crown.position.y = 3.2 + Math.sin(this.time * 1.8) * 0.15;
     const ringMat = this.ring.material as THREE.MeshBasicMaterial;

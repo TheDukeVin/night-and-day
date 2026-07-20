@@ -113,13 +113,10 @@ export class Player {
   private onKeyDown = (e: KeyboardEvent) => {
     if (e.target instanceof HTMLInputElement) return;
     if (!this.controlsEnabled) return;
-    if (e.code === 'Space') {
-      e.preventDefault(); // keep space from scrolling or re-triggering focused buttons
-      if (!this.airborne) {
-        this.airborne = true;
-        this.jumpVelocity = 8.5;
-      }
-    }
+    // Space only records the key here; `update` starts each jump from the held
+    // state. Jumping on the keydown edge stopped bouncing as soon as another
+    // key was pressed, because that cancels the OS auto-repeat for Space.
+    if (e.code === 'Space') e.preventDefault(); // don't scroll or re-fire a focused button
     this.keys.add(e.code);
   };
   private onKeyUp = (e: KeyboardEvent) => this.keys.delete(e.code);
@@ -172,6 +169,13 @@ export class Player {
     if (planar > maxDist) {
       this.mesh.position.x *= maxDist / planar;
       this.mesh.position.z *= maxDist / planar;
+    }
+
+    // Held Space re-launches the moment we touch down, so you keep bouncing for
+    // as long as it's down no matter what else is being pressed.
+    if (held('Space') && !this.airborne) {
+      this.airborne = true;
+      this.jumpVelocity = 8.5;
     }
 
     const groundY = this.heightAt(this.mesh.position.x, this.mesh.position.z);

@@ -487,3 +487,42 @@ body {
 .intro-skip:hover {
   opacity: 1;
 }
+
+/* ---------- Corner controls (settings + fullscreen) ---------- */
+
+#corner-controls {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  gap: 8px;
+  z-index: 40;
+}
+
+.corner-btn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--text);
+  background: var(--panel);
+  border: 2px solid var(--panel-border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+.corner-btn:hover {
+  transform: translateY(-1px);
+  background: rgba(58, 36, 100, 0.92);
+}
+.corner-btn.active {
+  border-color: var(--day);
+}
+
+/* Sits above the corner buttons, and covers the viewport even though it hangs
+   off <body> rather than #ui-root. */
+.settings-overlay {
+  position: fixed;
+  z-index: 50;
+}
