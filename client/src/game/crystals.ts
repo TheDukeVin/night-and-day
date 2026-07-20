@@ -17,13 +17,27 @@ export const COLOR_HEX: Record<CrystalColor, { day: number; night: number; ui: s
 export const DAY_PLATFORM_X = -10;
 export const NIGHT_PLATFORM_X = 10;
 
-const CRYSTAL_GEO = new THREE.IcosahedronGeometry(0.55, 0);
+export const CRYSTAL_RADIUS = 0.55;
+const CRYSTAL_GEO = new THREE.IcosahedronGeometry(CRYSTAL_RADIUS, 0);
+
+/** Where a freshly generated crystal materializes: a generator's crown scaffold. */
+export interface SpawnPoint {
+  color: CrystalColor;
+  side: Side;
+  position: THREE.Vector3;
+  quaternion: THREE.Quaternion;
+}
+
+/** How long a newly generated crystal shows its "just made" flourish. */
+const BURST_TIME = 1.6;
 
 interface CrystalMesh {
   root: THREE.Group;
   spin: number;
   bobPhase: number;
   slot: THREE.Vector3;
+  /** Seconds of birth flourish left: day crystals glow, night ones swirl stars. */
+  burst: number;
 }
 
 interface Cluster {
@@ -53,6 +67,8 @@ export function makeCrystalMesh(color: CrystalColor, side: Side): THREE.Group {
   });
   const mesh = new THREE.Mesh(CRYSTAL_GEO, mat);
   mesh.castShadow = true;
+  mesh.userData.body = true;
+  mesh.userData.baseEmissive = mat.emissiveIntensity;
   group.add(mesh);
 
   if (side === 'day') {
@@ -67,6 +83,8 @@ export function makeCrystalMesh(color: CrystalColor, side: Side): THREE.Group {
       })
     );
     halo.scale.setScalar(2.2);
+    halo.userData.halo = true;
+    halo.userData.baseOpacity = 0.45;
     group.add(halo);
   } else {
     // Tiny star specks that twinkle, as if the crystal holds a night sky.
@@ -77,6 +95,8 @@ export function makeCrystalMesh(color: CrystalColor, side: Side): THREE.Group {
       const r = 0.28 + Math.random() * 0.2;
       star.position.set(Math.cos(a) * r, (Math.random() - 0.5) * 0.5, Math.sin(a) * r);
       star.userData.twinklePhase = Math.random() * Math.PI * 2;
+      // Swirl parameters, used only during the birth flourish.
+      star.userData.swirl = { angle: a, radius: r, y: star.position.y, speed: 3.5 + Math.random() * 2.5 };
       group.add(star);
     }
   }
@@ -205,41 +225,61 @@ export class CrystalField {
     );
   }
 
-  /** Reconcile rendered crystals with the target counts. */
-  setCounts(counts: CrystalCounts, spawnFrom?: THREE.Vector3): void {
+  /**
+   * Reconcile rendered crystals with the target counts. `spawnPoints` are the
+   * crown scaffolds of the generator that was just pressed: new crystals
+   * materialize inside their matching scaffold, then fly to their ring slot.
+   */
+  setCounts(counts: CrystalCounts, spawnPoints?: SpawnPoint[]): void {
+    // One queue per color/side, consumed in order as crystals are created.
+    const queues = new Map<string, SpawnPoint[]>();
+    for (const p of spawnPoints ?? []) {
+      const key = `${p.color}:${p.side}`;
+      const q = queues.get(key);
+      if (q) q.push(p);
+      else queues.set(key, [p]);
+    }
+
     for (const cluster of this.clusters.values()) {
       const target = counts[cluster.color]?.[cluster.side] ?? 0;
       while (cluster.crystals.length > target) {
         const c = cluster.crystals.pop()!;
         this.group.remove(c.root);
       }
+      const queue = queues.get(`${cluster.color}:${cluster.side}`) ?? [];
+      let spawned = 0;
       while (cluster.crystals.length < target) {
         const index = cluster.crystals.length;
         const slot = this.slotFor(cluster, index);
         const root = makeCrystalMesh(cluster.color, cluster.side);
+        const from = queue[spawned];
         const crystal: CrystalMesh = {
           root,
           spin: 0.4 + Math.random() * 0.5,
           bobPhase: Math.random() * Math.PI * 2,
           slot,
+          burst: from ? BURST_TIME : 0,
         };
         cluster.crystals.push(crystal);
         this.group.add(root);
-        if (spawnFrom) {
-          // Fly from the generator to the slot.
-          const from = spawnFrom.clone().add(new THREE.Vector3(0, 1.5, 0));
-          root.position.copy(from);
-          root.scale.setScalar(0.01);
+        if (from) {
+          // Appear exactly where (and how) the scaffold sits, then fly over.
+          const start = from.position.clone();
+          const startQ = from.quaternion.clone();
+          const endQ = new THREE.Quaternion();
+          root.position.copy(start);
+          root.quaternion.copy(startQ);
           tween({
-            duration: 0.7,
-            delay: index % 9 === index ? 0 : 0.05 * (index % 3),
+            duration: 0.75,
+            delay: 0.14 * spawned,
             onUpdate: (t) => {
               const e = easeInOut(t);
-              root.position.lerpVectors(from, slot, e);
+              root.position.lerpVectors(start, slot, e);
               root.position.y += Math.sin(e * Math.PI) * 2.2;
-              root.scale.setScalar(0.01 + easeOutBack(t) * 0.99);
+              root.quaternion.slerpQuaternions(startQ, endQ, e);
             },
           });
+          spawned++;
         } else {
           root.position.copy(slot);
           root.scale.setScalar(0.01);
@@ -281,12 +321,41 @@ export class CrystalField {
         if (Math.abs(crystal.root.position.x - crystal.slot.x) < 0.01 && Math.abs(crystal.root.position.z - crystal.slot.z) < 0.01) {
           crystal.root.position.y = crystal.slot.y + bob;
         }
+        // Birth flourish: 1 right after generation, fading to 0.
+        const flourish = crystal.burst > 0 ? Math.min(1, crystal.burst / BURST_TIME) : 0;
+        if (crystal.burst > 0) crystal.burst = Math.max(0, crystal.burst - dt);
+
         if (cluster.side === 'night') {
           for (const child of crystal.root.children) {
             const phase = child.userData.twinklePhase;
             if (phase !== undefined) {
               const s = 0.6 + 0.55 * Math.sin(this.time * 3.2 + phase);
-              child.scale.setScalar(Math.max(0.15, s));
+              child.scale.setScalar(Math.max(0.15, s) * (1 + flourish * 1.4));
+            }
+            const swirl = child.userData.swirl;
+            // At flourish 0 this evaluates to the star's resting spot, so the
+            // swirl eases back home instead of snapping.
+            if (swirl) {
+              // Stars whirl out and around the new crystal, then settle back.
+              const angle = swirl.angle + this.time * swirl.speed * flourish;
+              const r = swirl.radius * (1 + flourish * 1.1);
+              child.position.set(
+                Math.cos(angle) * r,
+                swirl.y + Math.sin(angle * 2) * 0.3 * flourish,
+                Math.sin(angle) * r
+              );
+            }
+          }
+        } else {
+          for (const child of crystal.root.children) {
+            const mat = (child as THREE.Mesh).material as THREE.MeshPhysicalMaterial | undefined;
+            if (child.userData.body && mat) {
+              mat.emissiveIntensity = child.userData.baseEmissive * (1 + flourish * 3.0);
+            } else if (child.userData.halo) {
+              const halo = child as THREE.Sprite;
+              const pulse = 1 + flourish * (1.4 + Math.sin(this.time * 9) * 0.3);
+              halo.material.opacity = child.userData.baseOpacity * pulse;
+              halo.scale.setScalar(2.2 * (1 + flourish * 0.6));
             }
           }
         }

@@ -3,15 +3,22 @@
 // A floating sign above each shows exactly what one press produces.
 
 import * as THREE from 'three';
-import type { GeneratorDef, LevelDef, Side } from '../../../shared/types.ts';
-import { collectColors, COLOR_HEX, DAY_PLATFORM_X, NIGHT_PLATFORM_X } from './crystals.ts';
+import type { CrystalColor, GeneratorDef, LevelDef, Side } from '../../../shared/types.ts';
+import { collectColors, COLOR_HEX, CRYSTAL_RADIUS, DAY_PLATFORM_X, NIGHT_PLATFORM_X } from './crystals.ts';
+import type { SpawnPoint } from './crystals.ts';
 import { tween } from './anim.ts';
+
+// Scaffold geometry matches the crystal exactly, so a crystal appearing inside
+// one lines up edge for edge.
+const SCAFFOLD_GEO = new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(CRYSTAL_RADIUS, 0));
+const HULL_GEO = new THREE.IcosahedronGeometry(CRYSTAL_RADIUS, 0);
 
 export class GeneratorStand {
   readonly root = new THREE.Group();
   readonly def: GeneratorDef;
   readonly clickTargets: THREE.Object3D[] = [];
   private crown: THREE.Group;
+  private crownSlots: { color: CrystalColor; node: THREE.Group }[] = [];
   private ring: THREE.Mesh;
   private outline = new THREE.Group();
   private time = Math.random() * 10;
@@ -62,29 +69,32 @@ export class GeneratorStand {
     this.ring.position.y = 0.08;
     this.root.add(this.ring);
 
-    // The crown: one mini crystal per crystal produced (so "+2 red" shows two
-    // red crystals), hovering above the pedestal.
+    // The crown: one empty scaffold per crystal produced (so "+2 red" shows two
+    // red cages), hovering above the pedestal. Each is the wireframe of the
+    // crystal that will be born inside it — same size, same orientation.
     this.crown = new THREE.Group();
     this.crown.position.y = 3.2;
     const crownColors = def.outputs.flatMap((out) => Array<typeof out.color>(out.count).fill(out.color));
     const n = crownColors.length;
-    const spacing = n <= 4 ? 1.0 : 4.0 / (n - 1);
+    const spacing = n <= 4 ? 1.2 : 4.8 / (n - 1);
     crownColors.forEach((color, i) => {
       const hex = COLOR_HEX[color][def.side];
-      const mini = new THREE.Mesh(
-        new THREE.IcosahedronGeometry(0.38, 0),
-        new THREE.MeshPhysicalMaterial({
-          color: hex,
-          transparent: true,
-          opacity: 0.9,
-          emissive: hex,
-          emissiveIntensity: isDay ? 0.6 : 0.25,
-          flatShading: true,
-        })
+      const slot = new THREE.Group();
+      slot.position.x = n === 1 ? 0 : (i - (n - 1) / 2) * spacing;
+      const scaffold = new THREE.LineSegments(
+        SCAFFOLD_GEO,
+        new THREE.LineBasicMaterial({ color: hex, transparent: true, opacity: isDay ? 0.95 : 0.8 })
       );
-      mini.position.x = n === 1 ? 0 : (i - (n - 1) / 2) * spacing;
-      this.crown.add(mini);
-      this.clickTargets.push(mini);
+      slot.add(scaffold);
+      // Lines are hard to hit with a raycast, so click the invisible hull.
+      const hull = new THREE.Mesh(
+        HULL_GEO,
+        new THREE.MeshBasicMaterial({ visible: false })
+      );
+      slot.add(hull);
+      this.crown.add(slot);
+      this.crownSlots.push({ color, node: slot });
+      this.clickTargets.push(hull);
     });
     this.root.add(this.crown);
 
@@ -110,6 +120,20 @@ export class GeneratorStand {
   /** Toggle the white hover outline. */
   setHovered(on: boolean): void {
     this.outline.visible = on;
+  }
+
+  /**
+   * Where this generator's crystals are born: the world transform of each crown
+   * scaffold, so the crystal appears in the cage it came out of.
+   */
+  getSpawnPoints(): SpawnPoint[] {
+    this.root.updateMatrixWorld(true);
+    return this.crownSlots.map(({ color, node }) => ({
+      color,
+      side: this.def.side,
+      position: node.getWorldPosition(new THREE.Vector3()),
+      quaternion: node.getWorldQuaternion(new THREE.Quaternion()),
+    }));
   }
 
   /** Quick pulse when pressed. */

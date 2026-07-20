@@ -286,6 +286,22 @@ function showSettings(): void {
   sens.addEventListener('input', () => saveSettings({ mouseSensitivity: Number(sens.value) }));
   panel.append(el('div', { className: 'settings-row' }, [el('span', { text: 'Mouse sensitivity' }), sens]));
 
+  const lookMode = el('input') as HTMLInputElement;
+  lookMode.type = 'checkbox';
+  lookMode.checked = settings.cameraMode === 'pointerlock';
+  lookMode.addEventListener('change', () =>
+    saveSettings({ cameraMode: lookMode.checked ? 'pointerlock' : 'drag' })
+  );
+  panel.append(
+    el('div', { className: 'settings-row' }, [el('span', { text: 'Mouse-look (click to lock cursor)' }), lookMode])
+  );
+  panel.append(
+    el('div', {
+      className: 'settings-hint',
+      text: 'Off: hold right mouse button and drag to look around. On: click the game to lock your cursor and look around freely — press Esc to let go.',
+    })
+  );
+
   const quality = el('input') as HTMLInputElement;
   quality.type = 'checkbox';
   quality.checked = settings.quality === 'high';

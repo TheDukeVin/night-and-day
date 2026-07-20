@@ -8,10 +8,11 @@ import type { GameState, LevelDef, ServerMsg } from '../../../shared/types.ts';
 import type { GameChannel } from '../net/client.ts';
 import { getSettings } from '../settings.ts';
 import { Hud } from '../screens/hud.ts';
-import { dismissToast, showDialog, showToast, uiRoot } from '../screens/ui.ts';
+import { dismissToast, el, showDialog, showToast, uiRoot } from '../screens/ui.ts';
 import { clearTweens, updateTweens } from './anim.ts';
 import { playBalanceAnimation } from './balance.ts';
 import { CrystalField } from './crystals.ts';
+import type { SpawnPoint } from './crystals.ts';
 import { buildGenerators, GeneratorStand } from './generators.ts';
 import { Player, RemotePlayer } from './player.ts';
 import { Tutorial } from './tutorial.ts';
@@ -41,6 +42,7 @@ export class GameController {
   private poseTimer: number | undefined;
   private closeDialog: (() => void) | null = null;
   private iResetLast = false;
+  private crosshair: HTMLElement;
 
   constructor(
     private channel: GameChannel,
@@ -79,12 +81,16 @@ export class GameController {
     );
     uiRoot().append(this.hud.root);
 
+    this.crosshair = el('div', { className: 'crosshair' });
+    uiRoot().append(this.crosshair);
+
     channel.onMessage = (msg) => this.onMessage(msg);
 
     window.addEventListener('resize', this.onResize);
     canvas.addEventListener('click', this.onClick);
     canvas.addEventListener('mousemove', this.onMouseMove);
     canvas.addEventListener('mouseleave', this.onMouseLeave);
+    document.addEventListener('pointerlockchange', this.onPointerLockChange);
 
     // Debug/test handle for driving the game programmatically.
     (window as unknown as { __nd?: GameController }).__nd = this;
@@ -128,20 +134,21 @@ export class GameController {
       this.loadLevel(state.levelIndex, state);
       return;
     }
-    // Which generator changed? Use it as the spawn origin for the fly-in.
-    let spawnOrigin: THREE.Vector3 | undefined;
+    // Which generator changed? Its crown scaffolds are where the new crystals
+    // materialize before flying to the rings.
+    let spawnPoints: SpawnPoint[] | undefined;
     for (const stand of this.stands) {
       const before = this.lastPresses[stand.def.id] ?? 0;
       const after = state.presses[stand.def.id] ?? 0;
       if (after > before) {
-        spawnOrigin = stand.root.position.clone();
+        spawnPoints = [...(spawnPoints ?? []), ...stand.getSpawnPoints()];
         stand.pulse();
       }
     }
     const wasReset = Object.keys(state.presses).length === 0 && Object.keys(this.lastPresses).length > 0;
     this.lastPresses = { ...state.presses };
     const counts = currentCounts(this.level, state.presses);
-    this.field?.setCounts(counts, spawnOrigin);
+    this.field?.setCounts(counts, spawnPoints);
     this.hud.setCounts(counts);
 
     const balanced = Object.values(counts).every((c) => c.day === c.night);
@@ -189,11 +196,21 @@ export class GameController {
     this.pointerActive = false;
   };
 
+  private onPointerLockChange = (): void => {
+    this.crosshair.classList.toggle('visible', this.isPointerLocked());
+  };
+
+  private isPointerLocked(): boolean {
+    return document.pointerLockElement === this.renderer.domElement;
+  }
+
   /** Raycast the pointer each frame and outline the hovered generator. */
   private updateHover(): void {
     let hovered: GeneratorStand | null = null;
-    if (this.pointerActive && this.level && !this.busy) {
-      this.raycaster.setFromCamera(this.pointer, this.camera);
+    const locked = this.isPointerLocked();
+    if ((locked || this.pointerActive) && this.level && !this.busy) {
+      const ndc = locked ? new THREE.Vector2(0, 0) : this.pointer;
+      this.raycaster.setFromCamera(ndc, this.camera);
       for (const stand of this.stands) {
         if (this.raycaster.intersectObjects(stand.clickTargets, false).length > 0) {
           hovered = stand;
@@ -207,10 +224,16 @@ export class GameController {
 
   private onClick = (event: MouseEvent): void => {
     if (this.busy || !this.level) return;
-    const ndc = new THREE.Vector2(
-      (event.clientX / window.innerWidth) * 2 - 1,
-      -(event.clientY / window.innerHeight) * 2 + 1
-    );
+    const locked = this.isPointerLocked();
+    // In pointer-lock mode, the first click only engages the cursor lock
+    // (requested by Player's mousedown handler) — it isn't a game action yet.
+    if (getSettings().cameraMode === 'pointerlock' && !locked) return;
+    const ndc = locked
+      ? new THREE.Vector2(0, 0)
+      : new THREE.Vector2(
+          (event.clientX / window.innerWidth) * 2 - 1,
+          -(event.clientY / window.innerHeight) * 2 + 1
+        );
     this.raycaster.setFromCamera(ndc, this.camera);
     for (const stand of this.stands) {
       const hits = this.raycaster.intersectObjects(stand.clickTargets, false);
@@ -363,6 +386,9 @@ export class GameController {
     this.renderer.domElement.removeEventListener('click', this.onClick);
     this.renderer.domElement.removeEventListener('mousemove', this.onMouseMove);
     this.renderer.domElement.removeEventListener('mouseleave', this.onMouseLeave);
+    document.removeEventListener('pointerlockchange', this.onPointerLockChange);
+    if (document.pointerLockElement === this.renderer.domElement) document.exitPointerLock();
+    this.crosshair.remove();
     this.renderer.domElement.style.cursor = '';
     this.player.dispose();
     this.channel.close();
