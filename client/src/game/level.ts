@@ -351,6 +351,7 @@ export class GameController {
 
   private quit(): void {
     this.dispose();
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
     this.onQuit();
   }
 
