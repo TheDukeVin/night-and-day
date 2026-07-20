@@ -3,3 +3,5 @@ client/dist/
 .DS_Store
 .Rhistory
 .claude/settings.local.json
+.env
+server/data/

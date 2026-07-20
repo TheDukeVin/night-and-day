@@ -111,6 +111,24 @@ body {
   min-width: 0;
 }
 
+.auth-divider {
+  color: var(--text);
+  opacity: 0.6;
+  font-size: 16px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+.google-btn {
+  background: rgba(255, 243, 226, 0.95);
+  color: #2b1b4d;
+  border-color: rgba(255, 243, 226, 0.95);
+}
+.google-btn:hover:not(:disabled) {
+  background: #fff;
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.5);
+}
+
 .screen h2 {
   font-size: 34px;
   margin-bottom: 12px;

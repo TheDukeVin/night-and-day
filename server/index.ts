@@ -2,6 +2,8 @@
 // two-player rooms over WebSocket. The server is authoritative: all game
 // actions run through the shared GameSession reducer.
 
+import './env.ts';
+
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
@@ -9,6 +11,14 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { GameSession } from '../shared/session.ts';
 import type { ClientMsg, PlayerRole, ServerMsg } from '../shared/types.ts';
+import {
+  handleGoogleCallback,
+  handleGoogleStart,
+  handleLogin,
+  handleLogout,
+  handleMe,
+  handleRegister,
+} from './auth.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
 const DIST = join(fileURLToPath(new URL('.', import.meta.url)), '../client/dist');
@@ -32,8 +42,21 @@ const MIME: Record<string, string> = {
 };
 
 const httpServer = createServer(async (req, res) => {
+  const url = (req.url ?? '/').split('?')[0];
+
+  if (url.startsWith('/auth/')) {
+    const method = req.method ?? 'GET';
+    if (method === 'POST' && url === '/auth/register') return handleRegister(req, res);
+    if (method === 'POST' && url === '/auth/login') return handleLogin(req, res);
+    if (method === 'POST' && url === '/auth/logout') return handleLogout(req, res);
+    if (method === 'GET' && url === '/auth/me') return handleMe(req, res);
+    if (method === 'GET' && url === '/auth/google/start') return handleGoogleStart(req, res);
+    if (method === 'GET' && url === '/auth/google/callback') return handleGoogleCallback(req, res);
+    res.writeHead(404);
+    return res.end('Not found');
+  }
+
   try {
-    const url = (req.url ?? '/').split('?')[0];
     const safePath = normalize(url).replace(/^(\.\.[/\\])+/, '');
     let filePath = join(DIST, safePath === '/' ? 'index.html' : safePath);
     try {

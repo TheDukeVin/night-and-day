@@ -7,9 +7,12 @@ import { LoopbackChannel, SocketChannel, type GameChannel } from './net/client.t
 import { STARTER_LEVELS } from '../../shared/levels.ts';
 import type { ServerMsg } from '../../shared/types.ts';
 import { getSettings, saveSettings } from './settings.ts';
-import { button, clearUI, el, uiRoot } from './screens/ui.ts';
+import { button, clearUI, el, showDialog, uiRoot } from './screens/ui.ts';
+import { getCurrentUser, login, logout, register } from './net/auth.ts';
+import type { AuthUser } from '../../shared/authTypes.ts';
 
 let game: GameController | null = null;
+let currentUser: AuthUser | null = null;
 
 function screen(children: HTMLElement[], transparent = false): void {
   clearUI();
@@ -19,16 +22,95 @@ function screen(children: HTMLElement[], transparent = false): void {
 // ---------- Title ----------
 
 function showTitle(): void {
+  const status = el('div', { className: 'subtitle' }, [
+    currentUser ? `Signed in as ${currentUser.username}` : 'Playing as guest',
+    ' — ',
+    button(
+      currentUser ? 'Log out' : 'Sign in',
+      async () => {
+        if (currentUser) await logout();
+        currentUser = null;
+        showAuth();
+      },
+      'menu-btn small'
+    ),
+  ]);
   screen([
     el('h1', {
       className: 'game-title',
       html: '<span class="night-word">Night</span> and <span class="day-word">Day</span>',
     }),
     el('div', { className: 'subtitle', text: 'A math puzzle adventure at sunset' }),
+    status,
     button('New Game', showPackSelect),
     button('Settings', showSettings),
     button('Credits', showCredits),
   ]);
+}
+
+// ---------- Auth ----------
+
+function confirmGuest(): void {
+  showDialog({
+    title: 'Continue as Guest?',
+    message: 'Are you sure you want to continue as guest? Any progress you make may be lost.',
+    buttons: [
+      { label: 'Cancel', onClick: () => {}, className: 'menu-btn small back-link' },
+      {
+        label: 'Continue as Guest',
+        onClick: () => {
+          currentUser = null;
+          showTitle();
+        },
+      },
+    ],
+  });
+}
+
+function showAuth(mode: 'login' | 'register' = 'login'): void {
+  const username = el('input', { className: 'text-input' }) as HTMLInputElement;
+  username.placeholder = 'Username';
+  username.maxLength = 20;
+  const password = el('input', { className: 'text-input' }) as HTMLInputElement;
+  password.placeholder = 'Password';
+  password.type = 'password';
+  const error = el('div', { className: 'error-text', text: '' });
+
+  const go = async () => {
+    error.textContent = '';
+    const fn = mode === 'login' ? login : register;
+    const result = await fn(username.value.trim(), password.value);
+    if (result.error) {
+      error.textContent = result.error;
+      return;
+    }
+    currentUser = result.user ?? null;
+    showTitle();
+  };
+  password.addEventListener('keydown', (e) => e.key === 'Enter' && go());
+
+  screen([
+    el('h1', {
+      className: 'game-title',
+      html: '<span class="night-word">Night</span> and <span class="day-word">Day</span>',
+    }),
+    el('h2', { text: mode === 'login' ? 'Log In' : 'Create an Account' }),
+    username,
+    password,
+    error,
+    button(mode === 'login' ? 'Log In' : 'Register', go),
+    button(
+      mode === 'login' ? "New here? Register" : 'Already have an account? Log in',
+      () => showAuth(mode === 'login' ? 'register' : 'login'),
+      'menu-btn small back-link'
+    ),
+    el('div', { className: 'auth-divider', text: 'or' }),
+    button('Continue with Google', () => {
+      window.location.href = '/auth/google/start';
+    }, 'menu-btn google-btn'),
+    button('Continue as Guest', confirmGuest, 'menu-btn small'),
+  ]);
+  username.focus();
 }
 
 // ---------- Pack selection ----------
@@ -168,9 +250,17 @@ function startSinglePlayer(level: number): void {
   startGame(new LoopbackChannel(level), level);
 }
 
+function enterFullscreen(): void {
+  // Best-effort: browsers require a user gesture for this, which holds for
+  // every caller except the room joiner (whose "begin" arrives over the
+  // socket) — silently ignore rejection there. Escape exits it natively.
+  document.documentElement.requestFullscreen?.().catch(() => {});
+}
+
 function startGame(channel: GameChannel, startLevel: number): void {
   clearUI();
   game?.dispose();
+  enterFullscreen();
   game = new GameController(
     channel,
     () => {
@@ -228,4 +318,8 @@ function showCredits(): void {
   ]);
 }
 
-showTitle();
+getCurrentUser().then((user) => {
+  currentUser = user;
+  if (user) showTitle();
+  else showAuth();
+});
