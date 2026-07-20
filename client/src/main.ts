@@ -4,13 +4,20 @@
 import './style.css';
 import { GameController } from './game/level.ts';
 import { LoopbackChannel, SocketChannel, type GameChannel } from './net/client.ts';
-import { LEVEL_COUNT, STARTER_LEVELS, STARTER_PACK_ID } from '../../shared/levels.ts';
+import { LEVEL_COUNT, STARTER_LEVELS, STARTER_PACK_ID, STARTER_PACK_NAME } from '../../shared/levels.ts';
 import type { ServerMsg } from '../../shared/types.ts';
 import { getSettings, saveSettings } from './settings.ts';
 import { button, clearUI, el, showDialog, uiRoot } from './screens/ui.ts';
 import { getCurrentUser, login, logout, register } from './net/auth.ts';
 import type { AuthUser } from '../../shared/authTypes.ts';
-import { configureProgress, getUnlockedLevels, markLevelComplete, unionUnlocked } from './progress.ts';
+import {
+  configureProgress,
+  getUnlockedLevels,
+  isNewFromUnlocked,
+  isNewToPack,
+  markLevelComplete,
+  unionUnlocked,
+} from './progress.ts';
 
 let game: GameController | null = null;
 let currentUser: AuthUser | null = null;
@@ -240,9 +247,11 @@ function showLobby(room: string, isHost: boolean, channel: SocketChannel): void 
       if (!isHost) return;
       status.textContent = 'Choose a level:';
       const union = new Set(unionUnlocked(getUnlockedLevels(STARTER_PACK_ID, LEVEL_COUNT), msg.levels));
-      levelArea.replaceChildren(levelGrid((level) => channel.send({ t: 'begin', level }), union));
+      // Welcome the pair into the pack if it is new to either of them.
+      const intro = isNewToPack(STARTER_PACK_ID) || isNewFromUnlocked(msg.levels);
+      levelArea.replaceChildren(levelGrid((level) => channel.send({ t: 'begin', level, intro }), union));
     } else if (msg.t === 'begin') {
-      startGame(channel, msg.level);
+      startGame(channel, msg.level, msg.intro === true);
     } else if (msg.t === 'peer-left') {
       status.textContent = 'The other player left…';
       levelArea.replaceChildren();
@@ -268,7 +277,7 @@ function startTwoPlayer(kind: 'create' | 'join', room: string, onError: (m: stri
 }
 
 function startSinglePlayer(level: number): void {
-  startGame(new LoopbackChannel(level), level);
+  startGame(new LoopbackChannel(level), level, isNewToPack(STARTER_PACK_ID));
 }
 
 function enterFullscreen(): void {
@@ -278,7 +287,7 @@ function enterFullscreen(): void {
   document.documentElement.requestFullscreen?.().catch(() => {});
 }
 
-function startGame(channel: GameChannel, startLevel: number): void {
+function startGame(channel: GameChannel, startLevel: number, playIntro = false): void {
   clearUI();
   game?.dispose();
   enterFullscreen();
@@ -289,7 +298,8 @@ function startGame(channel: GameChannel, startLevel: number): void {
       showTitle();
     },
     startLevel,
-    (levelIndex) => markLevelComplete(STARTER_PACK_ID, levelIndex)
+    (levelIndex) => markLevelComplete(STARTER_PACK_ID, levelIndex),
+    playIntro ? STARTER_PACK_NAME : undefined
   );
 }
 

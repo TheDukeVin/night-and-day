@@ -13,6 +13,7 @@ import { clearTweens, updateTweens } from './anim.ts';
 import { playBalanceAnimation } from './balance.ts';
 import { CrystalField } from './crystals.ts';
 import { buildGenerators, GeneratorStand } from './generators.ts';
+import { IntroSequence } from './intro.ts';
 import { Player, RemotePlayer } from './player.ts';
 import { Tutorial } from './tutorial.ts';
 import { World } from './world.ts';
@@ -41,12 +42,16 @@ export class GameController {
   private poseTimer: number | undefined;
   private closeDialog: (() => void) | null = null;
   private iResetLast = false;
+  private intro: IntroSequence | null = null;
+  private pendingIntroToast: string | null = null;
 
+  /** `introPack` names the pack to welcome the player into; omit to skip the cutscene. */
   constructor(
     private channel: GameChannel,
     private onQuit: () => void,
     startLevel = 1,
-    private onLevelComplete?: (levelIndex: number) => void
+    private onLevelComplete?: (levelIndex: number) => void,
+    introPack?: string
   ) {
     const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: getSettings().quality === 'high' });
@@ -90,10 +95,55 @@ export class GameController {
     // Debug/test handle for driving the game programmatically.
     (window as unknown as { __nd?: GameController }).__nd = this;
 
+    if (introPack !== undefined) this.startIntro(introPack);
+
     this.tutorial.onGameStart();
     this.loadLevel(startLevel, { presses: {} });
     this.lastTime = performance.now();
     requestAnimationFrame(this.frame);
+  }
+
+  // ---------- Pack intro cutscene ----------
+
+  private startIntro(packName: string): void {
+    // Everything that would talk over the cutscene waits for it to end.
+    this.tutorial.setPaused(true);
+    this.hud.root.style.display = 'none';
+    this.player.cameraEnabled = false;
+    this.player.controlsEnabled = false;
+
+    this.intro = new IntroSequence({
+      scene: this.world.scene,
+      camera: this.camera,
+      packName,
+      chasePose: () => this.player.cameraPose(),
+      onControlsUnlocked: () => {
+        this.player.controlsEnabled = true;
+      },
+      onFinish: () => this.endIntro(),
+    });
+  }
+
+  private endIntro(): void {
+    if (!this.intro) return;
+    this.intro = null;
+    this.player.cameraEnabled = true;
+    this.player.controlsEnabled = true;
+    this.player.snapCamera();
+    this.hud.root.style.display = '';
+    // Order matches a normal level start: tips start flowing, then the level's
+    // own intro takes the screen (a toast replaces whatever is showing) and the
+    // remaining tips queue up behind it.
+    this.tutorial.setPaused(false);
+    if (this.pendingIntroToast) {
+      showToast(this.pendingIntroToast, 9);
+      this.pendingIntroToast = null;
+    }
+  }
+
+  /** Test/debug hook: end the cutscene immediately (same as the Skip button). */
+  skipIntro(): void {
+    this.intro?.skip();
   }
 
   // ---------- Level lifecycle ----------
@@ -115,7 +165,10 @@ export class GameController {
     this.field.setCounts(counts);
     this.hud.setCounts(counts);
 
-    if (this.level.intro) showToast(this.level.intro, 9);
+    if (this.level.intro) {
+      if (this.intro) this.pendingIntroToast = this.level.intro;
+      else showToast(this.level.intro, 9);
+    }
     this.tutorial.onLevelWithGenerators();
     if (this.level.generators.some((g) => g.outputs.length > 1 || g.outputs[0].count > 1)) {
       this.tutorial.onFirstMultiOutput();
@@ -193,7 +246,7 @@ export class GameController {
   /** Raycast the pointer each frame and outline the hovered generator. */
   private updateHover(): void {
     let hovered: GeneratorStand | null = null;
-    if (this.pointerActive && this.level && !this.busy) {
+    if (this.pointerActive && this.level && !this.busy && !this.intro) {
       this.raycaster.setFromCamera(this.pointer, this.camera);
       for (const stand of this.stands) {
         if (this.raycaster.intersectObjects(stand.clickTargets, false).length > 0) {
@@ -207,7 +260,7 @@ export class GameController {
   }
 
   private onClick = (event: MouseEvent): void => {
-    if (this.busy || !this.level) return;
+    if (this.busy || !this.level || this.intro) return;
     const ndc = new THREE.Vector2(
       (event.clientX / window.innerWidth) * 2 - 1,
       -(event.clientY / window.innerHeight) * 2 + 1
@@ -339,6 +392,7 @@ export class GameController {
     this.remote?.update(dt);
     this.field?.update(dt);
     for (const stand of this.stands) stand.update(dt);
+    this.intro?.update();
     this.updateHover();
     updateTweens(dt);
     this.renderer.render(this.world.scene, this.camera);
@@ -360,6 +414,8 @@ export class GameController {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.intro?.dispose();
+    this.intro = null;
     if (this.poseTimer !== undefined) window.clearInterval(this.poseTimer);
     window.removeEventListener('resize', this.onResize);
     this.renderer.domElement.removeEventListener('click', this.onClick);

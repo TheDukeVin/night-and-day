@@ -63,6 +63,10 @@ export class Player {
   readonly role: PlayerRole;
   yaw = 0; // facing direction
   moving = false;
+  /** Off while the intro cutscene drives the camera itself. */
+  cameraEnabled = true;
+  /** Off until the intro brings the player into frame. */
+  controlsEnabled = true;
   private velocity = new THREE.Vector3();
   private keys = new Set<string>();
   private cameraYaw = 0;
@@ -102,6 +106,7 @@ export class Player {
 
   private onKeyDown = (e: KeyboardEvent) => {
     if (e.target instanceof HTMLInputElement) return;
+    if (!this.controlsEnabled) return;
     if (e.code === 'Space') {
       e.preventDefault(); // keep space from scrolling or re-triggering focused buttons
       if (!this.airborne) {
@@ -114,7 +119,7 @@ export class Player {
   private onKeyUp = (e: KeyboardEvent) => this.keys.delete(e.code);
   private onBlur = () => this.keys.clear();
   private onMouseDown = (e: MouseEvent) => {
-    if (e.button === 0) this.dragging = true;
+    if (e.button === 0 && this.controlsEnabled) this.dragging = true;
   };
   private onMouseUp = () => (this.dragging = false);
   private onMouseMove = (e: MouseEvent) => {
@@ -125,8 +130,9 @@ export class Player {
   };
 
   update(dt: number): void {
-    const forward = (this.keys.has('KeyW') ? 1 : 0) - (this.keys.has('KeyS') ? 1 : 0);
-    const strafe = (this.keys.has('KeyD') ? 1 : 0) - (this.keys.has('KeyA') ? 1 : 0);
+    const held = (code: string) => (this.controlsEnabled && this.keys.has(code) ? 1 : 0);
+    const forward = held('KeyW') - held('KeyS');
+    const strafe = held('KeyD') - held('KeyA');
     const speed = 8;
 
     const move = new THREE.Vector3();
@@ -169,19 +175,34 @@ export class Player {
     const target = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, this.yaw, 0));
     this.mesh.quaternion.slerp(target, 1 - Math.exp(-12 * dt));
 
-    this.updateCamera(dt);
+    if (this.cameraEnabled) this.updateCamera(dt);
   }
 
-  private updateCamera(dt: number): void {
+  /** Where the chase camera wants to be right now, without moving it there. */
+  cameraPose(): { pos: THREE.Vector3; look: THREE.Vector3 } {
     const dist = 9;
     const p = this.mesh.position;
     const cx = p.x + Math.sin(this.cameraYaw) * Math.cos(this.cameraPitch) * dist;
     const cz = p.z + Math.cos(this.cameraYaw) * Math.cos(this.cameraPitch) * dist;
     const cy = p.y + Math.sin(this.cameraPitch) * dist + 1.4;
     const minY = this.heightAt(cx, cz) + 0.8;
-    const targetPos = new THREE.Vector3(cx, Math.max(cy, minY), cz);
-    this.camera.position.lerp(targetPos, 1 - Math.exp(-8 * dt));
-    this.camera.lookAt(p.x, p.y + 1.6, p.z);
+    return {
+      pos: new THREE.Vector3(cx, Math.max(cy, minY), cz),
+      look: new THREE.Vector3(p.x, p.y + 1.6, p.z),
+    };
+  }
+
+  private updateCamera(dt: number): void {
+    const { pos, look } = this.cameraPose();
+    this.camera.position.lerp(pos, 1 - Math.exp(-8 * dt));
+    this.camera.lookAt(look);
+  }
+
+  /** Put the camera on its chase mark immediately (used when skipping the intro). */
+  snapCamera(): void {
+    const { pos, look } = this.cameraPose();
+    this.camera.position.copy(pos);
+    this.camera.lookAt(look);
   }
 
   getPose(): PlayerPose {

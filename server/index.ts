@@ -140,7 +140,7 @@ wss.on('connection', (ws) => {
         if (!room || room.players.size < 2 || role !== 'day') return;
         room.session.startLevel(msg.level);
         room.started = true;
-        broadcast(room, { t: 'begin', level: room.session.state.levelIndex });
+        broadcast(room, { t: 'begin', level: room.session.state.levelIndex, intro: msg.intro });
         broadcast(room, { t: 'state', state: room.session.state });
         break;
       }

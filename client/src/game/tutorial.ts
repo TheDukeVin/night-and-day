@@ -8,8 +8,15 @@ import { showToast } from '../screens/ui.ts';
 export class Tutorial {
   private queue: { id: string; text: string }[] = [];
   private showing = false;
+  private paused = false;
 
   constructor(private role: PlayerRole) {}
+
+  /** Hold tips back (during the intro cutscene) without burning their seen-flags. */
+  setPaused(paused: boolean): void {
+    this.paused = paused;
+    if (!paused) this.pump();
+  }
 
   private offer(id: string, text: string): void {
     if (!getSettings().showTutorials || tutorialSeen(id)) return;
@@ -19,7 +26,7 @@ export class Tutorial {
   }
 
   private pump(): void {
-    if (this.showing) return;
+    if (this.showing || this.paused) return;
     const next = this.queue.shift();
     if (!next) return;
     this.showing = true;

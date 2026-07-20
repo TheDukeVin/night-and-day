@@ -68,6 +68,16 @@ export function markLevelComplete(packId: string, level: number): void {
   }
 }
 
+/** True when this player has never finished a level in the pack. */
+export function isNewToPack(packId: string): boolean {
+  return completedFor(packId).length === 0;
+}
+
+/** Same question for the peer, answered from the unlocked list they shared. */
+export function isNewFromUnlocked(levels: Iterable<number>): boolean {
+  return [...levels].every((level) => level <= 1);
+}
+
 export function unionUnlocked(mine: Iterable<number>, theirs: Iterable<number>): number[] {
   return [...new Set([...mine, ...theirs])];
 }

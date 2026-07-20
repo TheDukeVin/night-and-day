@@ -261,3 +261,6 @@ export const LEVEL_COUNT = STARTER_LEVELS.length;
 
 /** Pack id used to key unlock progress; free-form for future packs. */
 export const STARTER_PACK_ID = 'starter';
+
+/** Display name, shown under the title in the pack intro cutscene. */
+export const STARTER_PACK_NAME = 'Starter Pack';
