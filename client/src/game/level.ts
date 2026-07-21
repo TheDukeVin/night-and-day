@@ -13,7 +13,7 @@ import { clearTweens, updateTweens } from './anim.ts';
 import { playBalanceAnimation } from './balance.ts';
 import { CrystalField } from './crystals.ts';
 import type { SpawnPoint } from './crystals.ts';
-import { buildGenerators, GeneratorStand } from './generators.ts';
+import { buildGenerators, GeneratorStand, PEDESTAL_COLLIDER_RADIUS } from './generators.ts';
 import { Guides } from './guides.ts';
 import { IntroSequence } from './intro.ts';
 import { Player, RemotePlayer } from './player.ts';
@@ -22,6 +22,8 @@ import { Tutorial } from './tutorial.ts';
 import { World } from './world.ts';
 
 const INTERACT_RANGE = 8;
+
+type LevelBuildState = { presses: Record<string, number>; history: string[] };
 
 export class GameController {
   private renderer: THREE.WebGLRenderer;
@@ -38,6 +40,8 @@ export class GameController {
   private myPresses = 0;
   private myBalances = 0;
   private level: LevelDef | null = null;
+  /** Target level captured while the previous one's generators sink away. */
+  private pendingLevel: { index: number; state: LevelBuildState } | null = null;
   private lastPresses: Record<string, number> = {};
   private busy = false; // balance animation in flight
   private disposed = false;
@@ -175,7 +179,36 @@ export class GameController {
 
   // ---------- Level lifecycle ----------
 
-  private loadLevel(index: number, state: { presses: Record<string, number>; history: string[] }): void {
+  private loadLevel(index: number, state: LevelBuildState): void {
+    // Moving between levels: sink the current generators into the ground first,
+    // then build the new level and let its generators rise. On the very first
+    // load there is nothing to sink, so build straight away.
+    if (this.stands.length > 0) {
+      this.busy = true;
+      this.player.setColliders([]);
+      this.pendingLevel = { index, state };
+      const old = this.stands;
+      this.stands = [];
+      let remaining = old.length;
+      old.forEach((stand, i) =>
+        stand.sinkOut(i * 0.06, () => {
+          if (--remaining === 0 && this.pendingLevel) {
+            const p = this.pendingLevel;
+            this.pendingLevel = null;
+            this.buildLevel(p.index, p.state);
+          }
+        })
+      );
+    } else if (this.pendingLevel) {
+      // A fresh state arrived while the old generators are still sinking; the
+      // running sink will build this newer target when it finishes.
+      this.pendingLevel = { index, state };
+    } else {
+      this.buildLevel(index, state);
+    }
+  }
+
+  private buildLevel(index: number, state: LevelBuildState): void {
     this.level = getLevel(index);
     this.lastPresses = { ...state.presses };
     this.busy = false;
@@ -185,7 +218,14 @@ export class GameController {
     this.field = new CrystalField(this.level, this.world.heightAt);
     this.levelGroup.add(this.field.group);
     this.stands = buildGenerators(this.level, this.world.heightAt);
-    for (const stand of this.stands) this.levelGroup.add(stand.root);
+    this.stands.forEach((stand, i) => {
+      this.levelGroup.add(stand.root);
+      stand.riseIn(i * 0.08); // rise out of the ground, cage/sign appearing after
+    });
+    // Collisions turn on with the pedestals; crystals stay pass-through.
+    this.player.setColliders(
+      this.stands.map((s) => ({ x: s.root.position.x, z: s.root.position.z, radius: PEDESTAL_COLLIDER_RADIUS }))
+    );
 
     this.hud.setLevel(this.level);
     const counts = currentCounts(this.level, state.presses);
@@ -336,6 +376,7 @@ export class GameController {
       const ndc = locked ? new THREE.Vector2(0, 0) : this.pointer;
       this.raycaster.setFromCamera(ndc, this.camera);
       for (const stand of this.stands) {
+        if (!stand.isSolid()) continue;
         if (this.raycaster.intersectObjects(stand.clickTargets, false).length > 0) {
           hovered = stand;
           break;
@@ -360,6 +401,7 @@ export class GameController {
         );
     this.raycaster.setFromCamera(ndc, this.camera);
     for (const stand of this.stands) {
+      if (!stand.isSolid()) continue;
       const hits = this.raycaster.intersectObjects(stand.clickTargets, false);
       if (hits.length === 0) continue;
       const dist = stand.root.position.distanceTo(this.player.mesh.position);
