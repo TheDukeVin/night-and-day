@@ -39,9 +39,9 @@ export const STARTER_LEVELS: LevelDef[] = [
     index: 3,
     name: 'A Wider Gap',
     concept: 'Counting up',
-    initial: { red: { day: 1, night: 8 } },
+    initial: { red: { day: 1, night: 7 } },
     generators: [gen('d1', 'day', [['red', 1]])],
-    solution: { d1: 7 },
+    solution: { d1: 6 },
   },
   {
     index: 4,
@@ -67,9 +67,9 @@ export const STARTER_LEVELS: LevelDef[] = [
     name: 'Three at a Time',
     concept: 'Skip counting by 3',
     intro: 'Now every press makes THREE crystals. Count by threes to close the gap.',
-    initial: { red: { day: 2, night: 11 } },
+    initial: { red: { day: 2, night: 8 } },
     generators: [gen('d1', 'day', [['red', 3]])],
-    solution: { d1: 3 },
+    solution: { d1: 2 },
   },
   {
     index: 7,
@@ -149,18 +149,10 @@ export const STARTER_LEVELS: LevelDef[] = [
     generators: [gen('d1', 'day', [['red', 4]]), gen('n1', 'night', [['red', 3]])],
     solution: { d1: 2, n1: 3 },
   },
-  {
-    index: 16,
-    name: 'Fives and Threes',
-    concept: 'Groups of 5 and 3',
-    initial: { red: { day: 1, night: 8 } },
-    generators: [gen('d1', 'day', [['red', 5]]), gen('n1', 'night', [['red', 3]])],
-    solution: { d1: 2, n1: 1 },
-  },
 
   // --- A second color: each color counts on its own ---
   {
-    index: 17,
+    index: 16,
     name: 'True Blue',
     concept: 'A new color',
     intro: 'A new color appears! Blue crystals balance just like red ones — each color counts on its own.',
@@ -169,7 +161,7 @@ export const STARTER_LEVELS: LevelDef[] = [
     solution: { n1: 2 },
   },
   {
-    index: 18,
+    index: 17,
     name: 'Blue on Both Sides',
     concept: 'One color, both sides',
     initial: { blue: { day: 1, night: 4 } },
@@ -177,7 +169,7 @@ export const STARTER_LEVELS: LevelDef[] = [
     solution: { d1: 2, n1: 1 },
   },
   {
-    index: 19,
+    index: 18,
     name: 'Two Colors, Two Jobs',
     concept: 'Balancing colors separately',
     intro: 'Two colors at once! Balance each one on its own — red does not care about blue.',
@@ -186,7 +178,7 @@ export const STARTER_LEVELS: LevelDef[] = [
     solution: { d1: 1, d2: 2 },
   },
   {
-    index: 20,
+    index: 19,
     name: 'Two Colors, Two Sides',
     concept: 'Two colors, two gaps',
     initial: { red: { day: 2, night: 5 }, blue: { day: 4, night: 1 } },
@@ -194,7 +186,7 @@ export const STARTER_LEVELS: LevelDef[] = [
     solution: { d1: 3, n1: 3 },
   },
   {
-    index: 21,
+    index: 20,
     name: 'Crossed Colors',
     concept: 'Helping the other side',
     intro: 'Day makes blue and night makes red — each side fills the gap the other side needs.',
@@ -203,7 +195,7 @@ export const STARTER_LEVELS: LevelDef[] = [
     solution: { d1: 4, n1: 3 },
   },
   {
-    index: 22,
+    index: 21,
     name: 'Trading Colors',
     concept: 'Helping the other side',
     initial: { red: { day: 6, night: 0 }, blue: { day: 0, night: 8 } },
@@ -211,7 +203,7 @@ export const STARTER_LEVELS: LevelDef[] = [
     solution: { d1: 4, n1: 3 },
   },
   {
-    index: 23,
+    index: 22,
     name: 'Odd One Out',
     concept: 'Two colors, two gaps',
     initial: { red: { day: 4, night: 0 }, blue: { day: 2, night: 3 } },
@@ -219,7 +211,7 @@ export const STARTER_LEVELS: LevelDef[] = [
     solution: { d1: 1, n1: 2 },
   },
   {
-    index: 24,
+    index: 23,
     name: 'Different Groups',
     concept: 'Two colors, different groups',
     initial: { red: { day: 1, night: 7 }, blue: { day: 5, night: 1 } },
@@ -227,7 +219,7 @@ export const STARTER_LEVELS: LevelDef[] = [
     solution: { d1: 3, n1: 2 },
   },
   {
-    index: 25,
+    index: 24,
     name: 'Pick Your Helper',
     concept: 'Adding groups to make 5',
     intro: 'Night has two red generators — maybe you need both of them!',
@@ -240,7 +232,7 @@ export const STARTER_LEVELS: LevelDef[] = [
     solution: { d1: 3, n1: 1, n2: 1 },
   },
   {
-    index: 26,
+    index: 25,
     name: 'Two Helpers',
     concept: 'Adding groups together',
     initial: { red: { day: 5, night: 1 }, blue: { day: 0, night: 8 } },
@@ -254,7 +246,7 @@ export const STARTER_LEVELS: LevelDef[] = [
 
   // --- Combined generators: one press changes two colors ---
   {
-    index: 27,
+    index: 26,
     name: 'Two in One',
     concept: 'One press, two colors',
     intro: 'This generator makes a red AND a blue crystal every press. One button, two colors!',
@@ -268,7 +260,7 @@ export const STARTER_LEVELS: LevelDef[] = [
     solution: { d1: 4 },
   },
   {
-    index: 28,
+    index: 27,
     name: 'Two for One',
     concept: 'One press changes two colors',
     intro: 'Careful — the day generator makes two colors, but night only fixes one of them!',
@@ -283,7 +275,7 @@ export const STARTER_LEVELS: LevelDef[] = [
     solution: { d1: 3, n1: 5 },
   },
   {
-    index: 29,
+    index: 28,
     name: 'Double Duty',
     concept: 'One press, two colors',
     initial: { red: { day: 0, night: 4 }, blue: { day: 2, night: 5 } },
@@ -297,7 +289,7 @@ export const STARTER_LEVELS: LevelDef[] = [
     solution: { d1: 4, n1: 1 },
   },
   {
-    index: 30,
+    index: 29,
     name: 'Tangled Pair',
     concept: 'Untangling two colors',
     initial: { blue: { day: 4, night: 0 }, red: { day: 0, night: 1 } },
@@ -311,7 +303,7 @@ export const STARTER_LEVELS: LevelDef[] = [
     solution: { d1: 5, n1: 4 },
   },
   {
-    index: 31,
+    index: 30,
     name: 'Woven Threads',
     concept: 'Untangling groups',
     initial: { red: { day: 4, night: 0 }, blue: { day: 0, night: 0 } },
@@ -325,7 +317,7 @@ export const STARTER_LEVELS: LevelDef[] = [
     solution: { d1: 4, n1: 4 },
   },
   {
-    index: 32,
+    index: 31,
     name: 'Double Blues',
     concept: 'One color decides the other',
     initial: { red: { day: 3, night: 0 } },
@@ -339,7 +331,7 @@ export const STARTER_LEVELS: LevelDef[] = [
     solution: { d1: 6, n1: 3 },
   },
   {
-    index: 33,
+    index: 32,
     name: 'The Extra Helper',
     concept: 'Not every helper is needed',
     intro: 'Two red helpers, but you might only need one. Which one makes the gap exactly?',
@@ -350,6 +342,14 @@ export const STARTER_LEVELS: LevelDef[] = [
       gen('n2', 'night', [['red', 3]]),
     ],
     solution: { d1: 2, n1: 0, n2: 2 },
+  },
+  {
+    index: 33,
+    name: 'Fives and Threes',
+    concept: 'Groups of 5 and 3',
+    initial: { red: { day: 1, night: 7 } },
+    generators: [gen('d1', 'day', [['red', 5]]), gen('n1', 'night', [['red', 3]])],
+    solution: { d1: 3, n1: 3 },
   },
   {
     index: 34,
@@ -495,24 +495,6 @@ export const STARTER_LEVELS: LevelDef[] = [
   },
   {
     index: 43,
-    name: 'The Long Way Round',
-    concept: 'Big moves, careful counting',
-    initial: { red: { day: 5, night: 0 }, blue: { day: 0, night: 2 }, green: { day: 0, night: 1 } },
-    generators: [
-      gen('d1', 'day', [
-        ['red', 1],
-        ['blue', 2],
-      ]),
-      gen('d2', 'day', [['green', 1]]),
-      gen('n1', 'night', [
-        ['red', 2],
-        ['blue', 1],
-      ]),
-    ],
-    solution: { d1: 3, d2: 1, n1: 4 },
-  },
-  {
-    index: 44,
     name: 'A Busy Sky',
     concept: 'Three colors and a combined generator',
     initial: {
@@ -531,7 +513,7 @@ export const STARTER_LEVELS: LevelDef[] = [
     solution: { d1: 4, d2: 2, n1: 2 },
   },
   {
-    index: 45,
+    index: 44,
     name: 'Four Corners',
     concept: 'Four generators, pick wisely',
     intro: 'Four generators now — but one of them you will not need at all.',
@@ -549,7 +531,7 @@ export const STARTER_LEVELS: LevelDef[] = [
     solution: { d1: 2, d2: 3, n1: 4, n2: 0 },
   },
   {
-    index: 46,
+    index: 45,
     name: 'Tangled Sky',
     concept: 'Three colors, one combined pair',
     initial: {
@@ -568,7 +550,7 @@ export const STARTER_LEVELS: LevelDef[] = [
     solution: { d1: 3, d2: 2, n1: 3 },
   },
   {
-    index: 47,
+    index: 46,
     name: 'Balancing Act',
     concept: 'Keeping every color in balance',
     initial: {
@@ -585,7 +567,7 @@ export const STARTER_LEVELS: LevelDef[] = [
     solution: { n1: 3, d1: 2, d2: 2, n2: 0 },
   },
   {
-    index: 48,
+    index: 47,
     name: 'The Clever Sky',
     concept: 'A combined helper for two colors',
     initial: {
@@ -604,7 +586,7 @@ export const STARTER_LEVELS: LevelDef[] = [
     solution: { d1: 4, d2: 2, n1: 2 },
   },
   {
-    index: 49,
+    index: 48,
     name: 'One Last Practice',
     concept: 'Everything you have learned',
     initial: {
@@ -622,6 +604,24 @@ export const STARTER_LEVELS: LevelDef[] = [
       gen('n2', 'night', [['green', 1]]),
     ],
     solution: { d1: 3, d2: 0, n1: 1, n2: 4 },
+  },
+  {
+    index: 49,
+    name: 'The Long Way Round',
+    concept: 'Big moves, careful counting',
+    initial: { red: { day: 5, night: 0 }, blue: { day: 0, night: 2 }, green: { day: 0, night: 1 } },
+    generators: [
+      gen('d1', 'day', [
+        ['red', 1],
+        ['blue', 2],
+      ]),
+      gen('d2', 'day', [['green', 1]]),
+      gen('n1', 'night', [
+        ['red', 2],
+        ['blue', 1],
+      ]),
+    ],
+    solution: { d1: 3, d2: 1, n1: 4 },
   },
   {
     index: 50,
