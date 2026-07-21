@@ -14,6 +14,9 @@ export default defineConfig({
       '/progress': {
         target: 'http://localhost:8787',
       },
+      '/mechanics': {
+        target: 'http://localhost:8787',
+      },
     },
   },
   build: {

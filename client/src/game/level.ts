@@ -14,8 +14,10 @@ import { playBalanceAnimation } from './balance.ts';
 import { CrystalField } from './crystals.ts';
 import type { SpawnPoint } from './crystals.ts';
 import { buildGenerators, GeneratorStand } from './generators.ts';
+import { Guides } from './guides.ts';
 import { IntroSequence } from './intro.ts';
 import { Player, RemotePlayer } from './player.ts';
+import { hasSeenMechanic } from '../mechanics.ts';
 import { Tutorial } from './tutorial.ts';
 import { World } from './world.ts';
 
@@ -32,6 +34,9 @@ export class GameController {
   private levelGroup = new THREE.Group();
   private hud: Hud;
   private tutorial: Tutorial;
+  private guides: Guides;
+  private myPresses = 0;
+  private myBalances = 0;
   private level: LevelDef | null = null;
   private lastPresses: Record<string, number> = {};
   private busy = false; // balance animation in flight
@@ -88,6 +93,19 @@ export class GameController {
     );
     uiRoot().append(this.hud.root);
 
+    this.guides = new Guides({
+      watch: () => ({
+        usedKeys: this.player.usedKeys,
+        heldKeys: this.player.heldKeys,
+        turned: this.player.turned,
+        presses: this.myPresses,
+        balances: this.myBalances,
+      }),
+      pressAnchor: () => this.pressAnchor(),
+      balanceButton: this.hud.balanceButton,
+    });
+    uiRoot().append(this.guides.root);
+
     this.crosshair = el('div', { className: 'crosshair' });
     uiRoot().append(this.crosshair);
 
@@ -115,6 +133,7 @@ export class GameController {
   private startIntro(packName: string): void {
     // Everything that would talk over the cutscene waits for it to end.
     this.tutorial.setPaused(true);
+    this.guides.setPaused(true);
     this.hud.root.style.display = 'none';
     this.player.cameraEnabled = false;
     this.player.controlsEnabled = false;
@@ -142,6 +161,7 @@ export class GameController {
     // own intro takes the screen (a toast replaces whatever is showing) and the
     // remaining tips queue up behind it.
     this.tutorial.setPaused(false);
+    this.guides.setPaused(false);
     if (this.pendingIntroToast) {
       showToast(this.pendingIntroToast, 9);
       this.pendingIntroToast = null;
@@ -173,10 +193,15 @@ export class GameController {
     this.hud.setCounts(counts);
     this.updateUndoAvailability(state.history);
 
-    if (this.level.intro) {
+    // Skip the level's own intro toast for a player still meeting the mechanics
+    // (goal tip unseen): the guidance covers orientation and the toast would
+    // otherwise clobber the first tip. Returning players get the level flavor.
+    const firstTime = !hasSeenMechanic('goal');
+    if (this.level.intro && !firstTime) {
       if (this.intro) this.pendingIntroToast = this.level.intro;
       else showToast(this.level.intro, 9);
     }
+    if (this.stands.some((s) => this.canPress(s))) this.guides.unlock('press');
     this.tutorial.onLevelWithGenerators();
     if (this.level.generators.some((g) => g.outputs.length > 1 || g.outputs[0].count > 1)) {
       this.tutorial.onFirstMultiOutput();
@@ -228,7 +253,37 @@ export class GameController {
 
   private requestBalance(): void {
     if (this.busy) return;
+    this.myBalances++;
     this.channel.send({ t: 'balance' });
+  }
+
+  /** Generators this player is allowed to press (Dusk may press any). */
+  private canPress(stand: GeneratorStand): boolean {
+    return this.channel.role === 'dusk' || this.channel.role === stand.def.side;
+  }
+
+  /**
+   * Screen position of the generator the press guide points at: the nearest one
+   * this player can use, or null while it is off-screen or behind the camera.
+   */
+  private pressAnchor(): { x: number; y: number } | null {
+    let best: GeneratorStand | null = null;
+    let bestDist = Infinity;
+    for (const stand of this.stands) {
+      if (!this.canPress(stand)) continue;
+      const dist = stand.root.position.distanceTo(this.player.mesh.position);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = stand;
+      }
+    }
+    if (!best) return null;
+    const at = best.root.position.clone().setY(best.root.position.y + 2.4).project(this.camera);
+    if (at.z > 1 || Math.abs(at.x) > 1 || Math.abs(at.y) > 1) return null;
+    return {
+      x: ((at.x + 1) / 2) * window.innerWidth,
+      y: ((1 - at.y) / 2) * window.innerHeight,
+    };
   }
 
   private requestUndo(): void {
@@ -312,8 +367,7 @@ export class GameController {
         showToast('Walk closer to the generator to use it!', 3);
         return;
       }
-      const mine = this.channel.role === 'dusk' || this.channel.role === stand.def.side;
-      if (!mine) {
+      if (!this.canPress(stand)) {
         stand.deny();
         showToast(
           this.channel.role === 'day'
@@ -323,6 +377,8 @@ export class GameController {
         );
         return;
       }
+      this.myPresses++;
+      this.guides.unlock('balance');
       this.channel.send({ t: 'press', gen: stand.def.id });
       return;
     }
@@ -432,6 +488,7 @@ export class GameController {
     for (const stand of this.stands) stand.update(dt, this.camera);
     this.intro?.update();
     this.updateHover();
+    this.guides.update();
     updateTweens(dt);
     this.renderer.render(this.world.scene, this.camera);
     requestAnimationFrame(this.frame);
@@ -463,6 +520,7 @@ export class GameController {
     if (document.pointerLockElement === this.renderer.domElement) document.exitPointerLock();
     this.crosshair.remove();
     this.renderer.domElement.style.cursor = '';
+    this.guides.dispose();
     this.player.dispose();
     this.channel.close();
     clearTweens();

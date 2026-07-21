@@ -67,6 +67,10 @@ export class Player {
   cameraEnabled = true;
   /** Off until the intro brings the player into frame. */
   controlsEnabled = true;
+  /** Which controls the player has actually tried — read by the guide overlay. */
+  readonly usedKeys = new Set<string>();
+  /** Total camera rotation so far, radians; tells us mouse-look has clicked. */
+  turned = 0;
   private velocity = new THREE.Vector3();
   private keys = new Set<string>();
   private cameraYaw = 0;
@@ -118,7 +122,13 @@ export class Player {
     // key was pressed, because that cancels the OS auto-repeat for Space.
     if (e.code === 'Space') e.preventDefault(); // don't scroll or re-fire a focused button
     this.keys.add(e.code);
+    this.usedKeys.add(e.code);
   };
+
+  /** Keys down right now (the guide overlay lights up matching keycaps). */
+  get heldKeys(): ReadonlySet<string> {
+    return this.keys;
+  }
   private onKeyUp = (e: KeyboardEvent) => this.keys.delete(e.code);
   private onBlur = () => this.keys.clear();
   private onMouseDown = (e: MouseEvent) => {
@@ -135,8 +145,11 @@ export class Player {
     const locked = document.pointerLockElement === this.domElement;
     if (!this.dragging && !locked) return;
     const sens = getSettings().mouseSensitivity;
-    this.cameraYaw -= e.movementX * 0.0045 * sens;
+    const dYaw = e.movementX * 0.0045 * sens;
+    const before = this.cameraPitch;
+    this.cameraYaw -= dYaw;
     this.cameraPitch = THREE.MathUtils.clamp(this.cameraPitch + e.movementY * 0.003 * sens, 0.08, 1.15);
+    this.turned += Math.abs(dYaw) + Math.abs(this.cameraPitch - before);
   };
   private onContextMenu = (e: MouseEvent) => e.preventDefault();
   private onWheel = (e: WheelEvent) => {

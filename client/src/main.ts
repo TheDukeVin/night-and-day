@@ -19,6 +19,7 @@ import {
   markLevelComplete,
   unionUnlocked,
 } from './progress.ts';
+import { configureMechanics } from './mechanics.ts';
 
 let game: GameController | null = null;
 let currentUser: AuthUser | null = null;
@@ -40,6 +41,7 @@ function showTitle(): void {
         if (currentUser) await logout();
         currentUser = null;
         await configureProgress(currentUser);
+        await configureMechanics(currentUser);
         showAuth();
       },
       'menu-btn small'
@@ -71,6 +73,7 @@ function confirmGuest(): void {
         onClick: async () => {
           currentUser = null;
           await configureProgress(currentUser);
+          await configureMechanics(currentUser);
           showTitle();
         },
       },
@@ -97,6 +100,7 @@ function showAuth(mode: 'login' | 'register' = 'login'): void {
     }
     currentUser = result.user ?? null;
     await configureProgress(currentUser);
+    await configureMechanics(currentUser);
     showTitle();
   };
   password.addEventListener('keydown', (e) => e.key === 'Enter' && go());
@@ -333,6 +337,7 @@ mountCornerControls();
 getCurrentUser().then(async (user) => {
   currentUser = user;
   await configureProgress(currentUser);
+  await configureMechanics(currentUser);
   if (user) showTitle();
   else showAuth();
 });

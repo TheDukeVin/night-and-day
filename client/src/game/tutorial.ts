@@ -1,8 +1,12 @@
-// First-time guidance: short toasts introducing each mechanic the first time
-// the player encounters it. Seen-flags persist in localStorage.
+// Mechanic guidance: short toasts introducing each mechanic. Each tip shows only
+// on a player's FIRST encounter with that mechanic — the seen-set is tied to the
+// account (server-backed via mechanics.ts) for signed-in players and kept in
+// memory per session for guests. Ids are distinct from the `guide-*` visual cues
+// (guides.ts) so the two never share a seen-flag.
 
 import type { PlayerRole } from '../../../shared/types.ts';
-import { getSettings, markTutorialSeen, tutorialSeen } from '../settings.ts';
+import { getSettings } from '../settings.ts';
+import { hasSeenMechanic, markMechanicSeen } from '../mechanics.ts';
 import { showToast } from '../screens/ui.ts';
 
 export class Tutorial {
@@ -12,14 +16,14 @@ export class Tutorial {
 
   constructor(private role: PlayerRole) {}
 
-  /** Hold tips back (during the intro cutscene) without burning their seen-flags. */
+  /** Hold tips back (during the intro cutscene) without consuming them. */
   setPaused(paused: boolean): void {
     this.paused = paused;
     if (!paused) this.pump();
   }
 
   private offer(id: string, text: string): void {
-    if (!getSettings().showTutorials || tutorialSeen(id)) return;
+    if (!getSettings().showTutorials || hasSeenMechanic(id)) return;
     if (this.queue.some((q) => q.id === id)) return;
     this.queue.push({ id, text });
     this.pump();
@@ -30,7 +34,7 @@ export class Tutorial {
     const next = this.queue.shift();
     if (!next) return;
     this.showing = true;
-    markTutorialSeen(next.id);
+    markMechanicSeen(next.id);
     showToast(next.text, 7);
     window.setTimeout(() => {
       this.showing = false;
@@ -39,13 +43,14 @@ export class Tutorial {
   }
 
   onGameStart(): void {
-    this.offer('move', 'Use the W A S D keys to walk around. Drag with the mouse to look around.');
+    // Movement and looking are taught visually by the guide overlay (guides.ts);
+    // these tips carry only what a picture cannot.
     if (this.role === 'day') this.offer('role-day', 'You are Day! Only YOU can press the warm golden generators. Your partner handles the starry ones.');
     if (this.role === 'night') this.offer('role-night', 'You are Night! Only YOU can press the starry night generators. Your partner handles the golden ones.');
   }
 
   onLevelWithGenerators(): void {
-    this.offer('generator', 'Walk up to a generator (the stone pedestal) and click it to create crystals. The sign shows what each press makes.');
+    // Pressing a generator is taught by the visual press guide (guides.ts).
     this.offer('goal', 'Goal: every color needs the SAME number of day ☀ and night 🌙 crystals. Watch the counters at the top!');
   }
 

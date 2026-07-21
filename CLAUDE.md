@@ -42,6 +42,34 @@ production the WebSocket is same-origin on :8787. Stop stray servers with
 - Client screens are plain DOM overlays (`client/src/screens/`, styled by
   `client/src/style.css`); the 3D scene lives in `client/src/game/`. UI text
   targets elementary-school players: hints nudge, they don't explain solutions.
+- **First-time onboarding shows each cue only on a player's FIRST encounter with
+  that mechanic**, tied to the account — not the browser. The seen-set lives in
+  `client/src/mechanics.ts`: server-backed for signed-in players (`/mechanics`
+  GET + `/mechanics/seen` POST → `seen_mechanics` table, keyed by user id) so a
+  cue never re-shows on any browser once met, and **in-memory per session for
+  guests** (never localStorage — a different user on the same browser gets their
+  own first-time cues). `configureMechanics(user)` is called wherever
+  `configureProgress` is (boot/login/register/logout/guest). Each guidance item
+  checks `hasSeenMechanic(id)` before showing and calls `markMechanicSeen(id)`
+  when shown. Two layers, distinct id namespaces so they never share a flag:
+  - **Visual cues** (`client/src/game/guides.ts`, ids `guide-move|look|press|
+    balance`, styled `.guide-*` in `style.css`): nearly wordless, animated coach
+    marks shown **one at a time** in order `move → look → press → balance`, each
+    waiting until the player actually performs the action (tracked via
+    `Player.usedKeys`/`turned` and the controller's press/balance counters)
+    before advancing; `move`/`look` also expire after 30s so later cues still
+    surface. Form: white so they read against the 3D scene — WASD/Space
+    **keycaps** centered toward the left and a **mouse glyph** (drag button
+    blinking) centered right, echoing where each control sits; a pulsing **ring +
+    pointing hand** anchored over the nearest pressable generator (projected each
+    frame via `pressAnchor()`); a bouncing **arrow** over the glowing Balance
+    button.
+  - **Text tips** (`client/src/game/tutorial.ts`, ids `role-day|role-night|goal|
+    multi-output|balance`): short toasts for what a picture can't convey — role
+    (day/night), the balance goal, multi-output. The `move`/`generator` tips were
+    intentionally removed; the visual cues teach those.
+  Both pause/resume with the intro cutscene and respect `settings.showTutorials`
+  and `prefers-reduced-motion`.
 
 ## Conventions
 
