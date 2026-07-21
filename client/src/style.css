@@ -488,6 +488,20 @@ body {
   opacity: 1;
 }
 
+/* Standalone `/cutscene` viewer: the between-loops "Replaying…" note. */
+.cutscene-hint {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+.cutscene-hint.visible {
+  opacity: 0.8;
+}
+
 /* ---------- Corner controls (settings + fullscreen) ---------- */
 
 #corner-controls {
