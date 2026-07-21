@@ -6,12 +6,22 @@ import * as THREE from 'three';
 import type { CrystalColor, GeneratorDef, LevelDef, Side } from '../../../shared/types.ts';
 import { collectColors, COLOR_HEX, CRYSTAL_RADIUS, DAY_PLATFORM_X, NIGHT_PLATFORM_X } from './crystals.ts';
 import type { SpawnPoint } from './crystals.ts';
-import { tween } from './anim.ts';
+import { easeInOut, easeOutBack, tween } from './anim.ts';
 
 // Scaffold geometry matches the crystal exactly, so a crystal appearing inside
 // one lines up edge for edge.
 const SCAFFOLD_GEO = new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(CRYSTAL_RADIUS, 0));
 const HULL_GEO = new THREE.IcosahedronGeometry(CRYSTAL_RADIUS, 0);
+
+// How far a pedestal drops below its resting spot when hidden underground —
+// enough to tuck the whole stand beneath the (opaque) terrain — and how long the
+// rise/sink glides take.
+const SINK_DEPTH = 4;
+const RISE_TIME = 0.85;
+const SINK_TIME = 0.7;
+/** Horizontal radius a player is pushed out to when bumping a pedestal (its
+ * stone column/base; kept snug so players can still slip between neighbours). */
+export const PEDESTAL_COLLIDER_RADIUS = 1.4;
 
 // Scratch vectors for the per-frame sky test, so it allocates nothing.
 const SKY_TMP = new THREE.Vector3();
@@ -24,14 +34,21 @@ export class GeneratorStand {
   private crown: THREE.Group;
   private crownSlots: { color: CrystalColor; node: THREE.Group }[] = [];
   private ring: THREE.Mesh;
+  private sign!: THREE.Sprite;
+  private signScale = new THREE.Vector3(1, 1, 1);
   private outline = new THREE.Group();
   private time = Math.random() * 10;
+  /** Resting height of the stand; it animates up to this out of the ground. */
+  private readonly groundY: number;
+  /** True once the pedestal has fully risen and its cage/sign are shown. */
+  private solid = false;
   /** Day-side cage edges, re-tinted each frame by how bright the sky behind is. */
   private dayScaffolds: THREE.LineSegments[] = [];
 
   constructor(def: GeneratorDef, position: THREE.Vector3) {
     this.def = def;
     this.root.position.copy(position);
+    this.groundY = position.y;
 
     const isDay = def.side === 'day';
     const stoneMat = new THREE.MeshStandardMaterial({
@@ -137,6 +154,8 @@ export class GeneratorStand {
     sign.position.set(0, 1.15, 2.1);
     this.root.add(sign);
     this.clickTargets.push(sign);
+    this.sign = sign;
+    this.signScale.copy(sign.scale);
 
     if (!isDay) {
       // Orbiting star specks for night generators.
@@ -149,11 +168,72 @@ export class GeneratorStand {
     }
 
     for (const target of this.clickTargets) target.userData.generatorId = def.id;
+
+    // Start hidden underground: the cage scaffold and sign only appear once the
+    // pedestal has risen (see `riseIn`), so nothing pops in mid-air.
+    this.setAdornmentsVisible(false);
+    this.root.position.y = this.groundY - SINK_DEPTH;
   }
 
   /** Toggle the white hover outline. */
   setHovered(on: boolean): void {
     this.outline.visible = on;
+  }
+
+  /** Whether the pedestal has finished rising and can be pressed / collided with. */
+  isSolid(): boolean {
+    return this.solid;
+  }
+
+  /** Crown cage and output sign — shown only after the pedestal is up. */
+  private setAdornmentsVisible(on: boolean): void {
+    this.crown.visible = on;
+    this.sign.visible = on;
+  }
+
+  /** Rise out of the ground, then pop the cage scaffold and sign into place. */
+  riseIn(delay = 0): void {
+    this.solid = false;
+    this.setAdornmentsVisible(false);
+    this.root.position.y = this.groundY - SINK_DEPTH;
+    tween({
+      duration: RISE_TIME,
+      delay,
+      onUpdate: (t) => {
+        this.root.position.y = this.groundY - SINK_DEPTH * (1 - easeInOut(t));
+      },
+      onDone: () => this.revealAdornments(),
+    });
+  }
+
+  /** Sink back into the ground (cage/sign vanish first). */
+  sinkOut(delay = 0, onDone?: () => void): void {
+    this.solid = false;
+    this.setAdornmentsVisible(false);
+    tween({
+      duration: SINK_TIME,
+      delay,
+      onUpdate: (t) => {
+        this.root.position.y = this.groundY - SINK_DEPTH * easeInOut(t);
+      },
+      onDone,
+    });
+  }
+
+  private revealAdornments(): void {
+    this.solid = true;
+    this.root.position.y = this.groundY;
+    this.setAdornmentsVisible(true);
+    this.crown.scale.setScalar(0.01);
+    this.sign.scale.set(0.01, 0.01, 1);
+    tween({
+      duration: 0.4,
+      onUpdate: (t) => {
+        const s = 0.01 + easeOutBack(t) * 0.99;
+        this.crown.scale.setScalar(s);
+        this.sign.scale.set(this.signScale.x * s, this.signScale.y * s, 1);
+      },
+    });
   }
 
   /**

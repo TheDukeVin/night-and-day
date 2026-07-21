@@ -5,6 +5,9 @@ import * as THREE from 'three';
 import type { PlayerPose, PlayerRole } from '../../../shared/types.ts';
 import { getSettings } from '../settings.ts';
 
+/** Player's horizontal footprint, used when pushing out of solid pedestals. */
+const PLAYER_RADIUS = 0.5;
+
 const ROLE_STYLE: Record<PlayerRole, { body: number; accent: number; emissive: number }> = {
   day: { body: 0xffc776, accent: 0xfff3e2, emissive: 0x8a5a1a },
   night: { body: 0x3d4e9e, accent: 0x8ea6ff, emissive: 0x1a2455 },
@@ -71,6 +74,8 @@ export class Player {
   readonly usedKeys = new Set<string>();
   /** Total camera rotation so far, radians; tells us mouse-look has clicked. */
   turned = 0;
+  /** Solid pedestals to slide around (crystals are pass-through). */
+  private colliders: { x: number; z: number; radius: number }[] = [];
   private velocity = new THREE.Vector3();
   private keys = new Set<string>();
   private cameraYaw = 0;
@@ -125,6 +130,36 @@ export class Player {
     this.usedKeys.add(e.code);
   };
 
+  /**
+   * Set the pedestals the player collides with. Each is a vertical cylinder the
+   * player is pushed out of; only the generator's stone counts — the floating
+   * crystals and cage stay pass-through.
+   */
+  setColliders(colliders: { x: number; z: number; radius: number }[]): void {
+    this.colliders = colliders;
+  }
+
+  /** Slide the player out of any pedestal it has walked into (horizontal only). */
+  private resolveCollisions(): void {
+    const p = this.mesh.position;
+    for (const c of this.colliders) {
+      const dx = p.x - c.x;
+      const dz = p.z - c.z;
+      const min = c.radius + PLAYER_RADIUS;
+      const distSq = dx * dx + dz * dz;
+      if (distSq >= min * min) continue;
+      const dist = Math.sqrt(distSq);
+      if (dist > 1e-4) {
+        const push = min / dist;
+        p.x = c.x + dx * push;
+        p.z = c.z + dz * push;
+      } else {
+        // Dead-center: shove straight out along +z so we never divide by zero.
+        p.z = c.z + min;
+      }
+    }
+  }
+
   /** Keys down right now (the guide overlay lights up matching keycaps). */
   get heldKeys(): ReadonlySet<string> {
     return this.keys;
@@ -175,6 +210,9 @@ export class Player {
 
     this.velocity.lerp(move.multiplyScalar(speed), 1 - Math.exp(-10 * dt));
     this.mesh.position.addScaledVector(this.velocity, dt);
+
+    // Push back out of any pedestal we've stepped into.
+    this.resolveCollisions();
 
     // Keep inside the world.
     const maxDist = 200;
