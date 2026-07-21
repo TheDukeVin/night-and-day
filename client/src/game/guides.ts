@@ -1,11 +1,14 @@
 // Visual first-time guides: one animated coach mark at a time, each waiting for
 // the player to actually perform the action before the next one appears. Nearly
 // wordless — keycaps, a mouse glyph, a pointing hand — so young players can read
-// them at a glance. Seen-flags share the tutorial store, so "Replay tutorial
-// tips" replays these too.
+// them at a glance. Each cue shows only on a player's FIRST encounter with that
+// mechanic: the seen-set is tied to the account (server-backed via mechanics.ts)
+// for signed-in players and kept in memory per session for guests. Ids are
+// namespaced `guide-*` so they never collide with the text tips.
 
 import { el } from '../screens/ui.ts';
-import { getSettings, markTutorialSeen, tutorialSeen } from '../settings.ts';
+import { getSettings } from '../settings.ts';
+import { hasSeenMechanic, markMechanicSeen } from '../mechanics.ts';
 
 export type GuideId = 'move' | 'look' | 'press' | 'balance';
 
@@ -49,7 +52,7 @@ export class Guides {
     this.root = el('div', { className: 'guides' });
   }
 
-  /** Hold guides back (during the intro cutscene) without burning seen-flags. */
+  /** Hold guides back (during the intro cutscene) without consuming them. */
   setPaused(paused: boolean): void {
     this.paused = paused;
     if (paused) this.clearCard();
@@ -76,7 +79,7 @@ export class Guides {
     if (!this.active || !this.card) return;
 
     if (this.satisfied(this.active) || this.expired(this.active)) {
-      markTutorialSeen(guideKey(this.active));
+      markMechanicSeen(guideKey(this.active));
       const finished = this.card;
       finished.classList.add('guide-complete');
       window.setTimeout(() => finished.remove(), 450);
@@ -96,11 +99,11 @@ export class Guides {
   /** The first guide that is unlocked, unseen and not yet satisfied. */
   private pick(): GuideId | null {
     for (const id of ORDER) {
-      if (tutorialSeen(guideKey(id))) continue;
+      if (hasSeenMechanic(guideKey(id))) continue;
       if (!this.unlocked.has(id)) return null; // wait here rather than skipping ahead
       if (this.satisfied(id) && id !== this.active) {
         // Already done before we could show it (e.g. a returning player).
-        markTutorialSeen(guideKey(id));
+        markMechanicSeen(guideKey(id));
         continue;
       }
       return id;
@@ -193,6 +196,9 @@ function place(node: HTMLElement, x: number, y: number): void {
   node.style.top = `${y}px`;
 }
 
+/** Seen-store key for a guide, namespaced so it never collides with a text tip. */
+const guideKey = (id: GuideId): string => `guide-${id}`;
+
 /** Mouse body with the look button called out and a swinging arc above it. */
 function buildMouse(): HTMLElement {
   // Body is a 36×60 stadium; the two buttons are quarter wedges around the
@@ -212,5 +218,3 @@ function buildMouse(): HTMLElement {
     </svg>`;
   return el('div', { className: 'mouse-glyph', html: svg });
 }
-
-const guideKey = (id: GuideId): string => `guide-${id}`;

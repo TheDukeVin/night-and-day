@@ -20,6 +20,7 @@ import {
   handleRegister,
 } from './auth.ts';
 import { handleCompleteLevel, handleGetProgress } from './progress.ts';
+import { handleGetMechanics, handleMarkMechanicSeen } from './mechanics.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
 const DIST = join(fileURLToPath(new URL('.', import.meta.url)), '../client/dist');
@@ -66,6 +67,19 @@ const httpServer = createServer(async (req, res) => {
   if (url === '/progress/complete') {
     const method = req.method ?? 'GET';
     if (method === 'POST') return handleCompleteLevel(req, res);
+    res.writeHead(404);
+    return res.end('Not found');
+  }
+
+  if (url === '/mechanics') {
+    const method = req.method ?? 'GET';
+    if (method === 'GET') return handleGetMechanics(req, res);
+    res.writeHead(404);
+    return res.end('Not found');
+  }
+  if (url === '/mechanics/seen') {
+    const method = req.method ?? 'GET';
+    if (method === 'POST') return handleMarkMechanicSeen(req, res);
     res.writeHead(404);
     return res.end('Not found');
   }

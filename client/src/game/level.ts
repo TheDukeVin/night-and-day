@@ -17,6 +17,7 @@ import { buildGenerators, GeneratorStand } from './generators.ts';
 import { Guides } from './guides.ts';
 import { IntroSequence } from './intro.ts';
 import { Player, RemotePlayer } from './player.ts';
+import { hasSeenMechanic } from '../mechanics.ts';
 import { Tutorial } from './tutorial.ts';
 import { World } from './world.ts';
 
@@ -192,7 +193,11 @@ export class GameController {
     this.hud.setCounts(counts);
     this.updateUndoAvailability(state.history);
 
-    if (this.level.intro) {
+    // Skip the level's own intro toast for a player still meeting the mechanics
+    // (goal tip unseen): the guidance covers orientation and the toast would
+    // otherwise clobber the first tip. Returning players get the level flavor.
+    const firstTime = !hasSeenMechanic('goal');
+    if (this.level.intro && !firstTime) {
       if (this.intro) this.pendingIntroToast = this.level.intro;
       else showToast(this.level.intro, 9);
     }

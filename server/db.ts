@@ -33,6 +33,12 @@ db.exec(`
     completed_at TEXT NOT NULL,
     PRIMARY KEY (user_id, pack_id, level_index)
   );
+  CREATE TABLE IF NOT EXISTS seen_mechanics (
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    mechanic TEXT NOT NULL,
+    seen_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, mechanic)
+  );
 `);
 
 export interface UserRow {
@@ -101,4 +107,19 @@ export function markLevelComplete(userId: number, packId: string, levelIndex: nu
   db.prepare(
     'INSERT OR IGNORE INTO progress (user_id, pack_id, level_index, completed_at) VALUES (?, ?, ?, ?)'
   ).run(userId, packId, levelIndex, new Date().toISOString());
+}
+
+/** Mechanic-guidance ids this user has already encountered (see client guides.ts
+ *  / tutorial.ts). Used to show each first-time cue only on its first encounter. */
+export function getSeenMechanics(userId: number): string[] {
+  const rows = db
+    .prepare('SELECT mechanic FROM seen_mechanics WHERE user_id = ?')
+    .all(userId) as { mechanic: string }[];
+  return rows.map((r) => r.mechanic);
+}
+
+export function markMechanicSeen(userId: number, mechanic: string): void {
+  db.prepare(
+    'INSERT OR IGNORE INTO seen_mechanics (user_id, mechanic, seen_at) VALUES (?, ?, ?)'
+  ).run(userId, mechanic, new Date().toISOString());
 }

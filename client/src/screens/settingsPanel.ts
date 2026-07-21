@@ -2,7 +2,7 @@
 // screen and the corner ⚙ button's overlay (which can open mid-game).
 
 import { getSettings, saveSettings } from '../settings.ts';
-import { button, el } from './ui.ts';
+import { el } from './ui.ts';
 
 export function buildSettingsPanel(): HTMLElement {
   const settings = getSettings();
@@ -47,13 +47,6 @@ export function buildSettingsPanel(): HTMLElement {
   tut.checked = settings.showTutorials;
   tut.addEventListener('change', () => saveSettings({ showTutorials: tut.checked }));
   panel.append(el('div', { className: 'settings-row' }, [el('span', { text: 'Show tutorial tips' }), tut]));
-
-  const resetTut = button(
-    'Replay tutorial tips',
-    () => localStorage.removeItem('night-and-day-tutorials-seen'),
-    'menu-btn small'
-  );
-  panel.append(el('div', { className: 'settings-row' }, [resetTut]));
 
   return panel;
 }

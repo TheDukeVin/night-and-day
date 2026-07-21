@@ -488,6 +488,45 @@ body {
   opacity: 1;
 }
 
+/* ---------- Corner controls (settings + fullscreen) ---------- */
+
+#corner-controls {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  gap: 8px;
+  z-index: 40;
+}
+
+.corner-btn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--text);
+  background: var(--panel);
+  border: 2px solid var(--panel-border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+.corner-btn:hover {
+  transform: translateY(-1px);
+  background: rgba(58, 36, 100, 0.92);
+}
+.corner-btn.active {
+  border-color: var(--day);
+}
+
+/* Sits above the corner buttons, and covers the viewport even though it hangs
+   off <body> rather than #ui-root. */
+.settings-overlay {
+  position: fixed;
+  z-index: 50;
+}
+
 /* ---------- First-time guides (guides.ts) ---------- */
 
 /* Selector matches `#ui-root > *`'s specificity so the overlay really does let
@@ -525,13 +564,19 @@ body {
   opacity: 0;
 }
 
-/* --- Movement + look: bottom-right corner, clear of the centered toast and
-       the centered HUD button row --- */
+/* --- Movement + look: shown one at a time, placed to echo where each control
+       lives — the WASD keycaps toward the left, the mouse toward the right,
+       both vertically centered. --- */
 
-.guide-move,
+.guide-move {
+  top: 50%;
+  left: 25%;
+  transform: translate(-50%, -50%);
+}
 .guide-look {
-  bottom: 86px;
-  right: 34px;
+  top: 50%;
+  left: 75%;
+  transform: translate(-50%, -50%);
 }
 
 .keycaps {
@@ -553,9 +598,9 @@ body {
   justify-content: center;
   font-size: 20px;
   font-weight: bold;
-  color: var(--text);
-  background: var(--panel);
-  border: 2px solid var(--panel-border);
+  color: #17203a;
+  background: #fff;
+  border: 2px solid #fff;
   border-radius: 10px;
   box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35);
   animation: keycap-nudge 1.6s ease-in-out infinite;
@@ -585,12 +630,13 @@ body {
   animation-delay: 0.36s;
 }
 
-/* Pressed right now. */
+/* Pressed right now: glows white. */
 .keycap.held {
   transform: translateY(3px) scale(0.94);
-  background: var(--day);
-  color: #2b1b4d;
-  border-color: var(--text);
+  background: #fff;
+  color: #17203a;
+  border-color: #fff;
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.9);
   animation: none;
 }
 
@@ -598,8 +644,8 @@ body {
 .keycap.done {
   animation: none;
   opacity: 0.5;
-  border-color: rgba(157, 255, 176, 0.8);
-  box-shadow: 0 0 10px rgba(157, 255, 176, 0.35);
+  border-color: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.4);
 }
 .keycap.done.held {
   opacity: 1;
@@ -614,21 +660,21 @@ body {
   filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.45));
 }
 .mouse-svg .shell {
-  fill: var(--panel);
-  stroke: var(--panel-border);
+  fill: rgba(20, 24, 45, 0.55);
+  stroke: #fff;
   stroke-width: 2.5;
 }
 .mouse-svg .btn {
   fill: transparent;
 }
 .mouse-svg .split {
-  stroke: var(--panel-border);
+  stroke: #fff;
   stroke-width: 2;
 }
 
-/* The button to hold blinks; pointer-lock mode calls out the left one instead. */
+/* The button to hold blinks white; pointer-lock mode calls out the left one instead. */
 .mouse-svg .right {
-  fill: var(--day);
+  fill: #fff;
   animation: guide-blink 1.4s ease-in-out infinite;
 }
 .guide-look.locking .mouse-svg .right {
@@ -636,7 +682,7 @@ body {
   animation: none;
 }
 .guide-look.locking .mouse-svg .left {
-  fill: var(--day);
+  fill: #fff;
   animation: guide-blink 1.4s ease-in-out infinite;
 }
 @keyframes guide-blink {
@@ -651,12 +697,12 @@ body {
 
 /* Double arrow above the mouse, sliding side to side: the drag it wants. */
 .mouse-svg .drag-arrow line {
-  stroke: var(--text);
+  stroke: #fff;
   stroke-width: 3;
   stroke-linecap: round;
 }
 .mouse-svg .drag-arrow path {
-  fill: var(--text);
+  fill: #fff;
 }
 .mouse-svg .drag-arrow {
   animation: drag-swing 2s ease-in-out infinite;
@@ -681,9 +727,9 @@ body {
   width: 96px;
   height: 96px;
   margin: -48px 0 0 -48px;
-  border: 3px solid var(--day);
+  border: 3px solid #fff;
   border-radius: 50%;
-  box-shadow: 0 0 18px rgba(255, 199, 118, 0.6);
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.6);
   animation: ring-pulse 1.5s ease-out infinite;
 }
 @keyframes ring-pulse {
@@ -725,8 +771,8 @@ body {
 }
 .guide-balance .guide-arrow {
   font-size: 30px;
-  color: var(--day);
-  text-shadow: 0 0 14px rgba(255, 199, 118, 0.9);
+  color: #fff;
+  text-shadow: 0 0 14px rgba(255, 255, 255, 0.9);
   animation: arrow-bounce 0.9s ease-in-out infinite;
 }
 @keyframes arrow-bounce {
@@ -758,43 +804,4 @@ body {
     animation-duration: 0.001s !important;
     animation-iteration-count: 1 !important;
   }
-}
-
-/* ---------- Corner controls (settings + fullscreen) ---------- */
-
-#corner-controls {
-  position: fixed;
-  top: 12px;
-  right: 12px;
-  display: flex;
-  gap: 8px;
-  z-index: 40;
-}
-
-.corner-btn {
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  font-size: 20px;
-  line-height: 1;
-  color: var(--text);
-  background: var(--panel);
-  border: 2px solid var(--panel-border);
-  border-radius: 12px;
-  cursor: pointer;
-  transition: transform 0.12s ease, background 0.12s ease;
-}
-.corner-btn:hover {
-  transform: translateY(-1px);
-  background: rgba(58, 36, 100, 0.92);
-}
-.corner-btn.active {
-  border-color: var(--day);
-}
-
-/* Sits above the corner buttons, and covers the viewport even though it hangs
-   off <body> rather than #ui-root. */
-.settings-overlay {
-  position: fixed;
-  z-index: 50;
 }
