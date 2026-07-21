@@ -16,7 +16,8 @@ export class Hud {
   private countBoard: HTMLElement;
   private levelLabel: HTMLElement;
   private cells = new Map<CrystalColor, { day: HTMLElement; night: HTMLElement; cell: HTMLElement }>();
-  private balanceButton: HTMLButtonElement;
+  /** Exposed so the guide overlay can point at it. */
+  readonly balanceButton: HTMLButtonElement;
   private undoButton: HTMLButtonElement;
   private resetButton: HTMLButtonElement;
   private canUndo = false;

@@ -39,13 +39,13 @@ export class Tutorial {
   }
 
   onGameStart(): void {
-    this.offer('move', 'Use the W A S D keys to walk around. Drag with the mouse to look around.');
+    // Movement, pressing and balancing are taught visually by the guide overlay
+    // (`guides.ts`) — these tips carry only what a picture cannot.
     if (this.role === 'day') this.offer('role-day', 'You are Day! Only YOU can press the warm golden generators. Your partner handles the starry ones.');
     if (this.role === 'night') this.offer('role-night', 'You are Night! Only YOU can press the starry night generators. Your partner handles the golden ones.');
   }
 
   onLevelWithGenerators(): void {
-    this.offer('generator', 'Walk up to a generator (the stone pedestal) and click it to create crystals. The sign shows what each press makes.');
     this.offer('goal', 'Goal: every color needs the SAME number of day ☀ and night 🌙 crystals. Watch the counters at the top!');
   }
 
@@ -54,6 +54,6 @@ export class Tutorial {
   }
 
   onFirstBalanceReady(): void {
-    this.offer('balance', 'Think the sides match? Press the ⚖ Balance button to find out — matching crystals will cancel each other out.');
+    this.offer('balance', 'Matching sides cancel each other out — try ⚖ Balance!');
   }
 }
