@@ -7,7 +7,7 @@ linear Diophantine equations, dressed up as a sunset stroll.
 - **Single player**: play as **Dusk**, who can use every generator.
 - **Two players**: one player is **Day** (golden generators only), the other is
   **Night** (starry generators only) — you must collaborate to balance the level.
-- **Starter pack**: 20 levels ramping from simple counting through
+- **Starter pack**: 50 levels ramping gently from simple counting through
   multiplication, differences, and remainder puzzles to multi-color systems.
 - Stuck? **Reset** offers a hint (how many times to press one generator); after a
   hint plus 5 more resets the game offers the full answer.

@@ -144,7 +144,7 @@ function packCard(name: string, desc: string, enabled: boolean, onClick?: () => 
 function showPackSelect(): void {
   screen([
     el('h2', { text: 'Choose a Pack' }),
-    packCard('⭐ Starter', '20 levels — counting, adding, groups and sharing', true, showModeSelect),
+    packCard('⭐ Starter', '50 levels — counting, adding, groups and sharing', true, showModeSelect),
     packCard('🔢 Fractions', 'Coming soon', false),
     packCard('📐 Geometry', 'Coming soon', false),
     button('← Back', showTitle, 'menu-btn small back-link'),
