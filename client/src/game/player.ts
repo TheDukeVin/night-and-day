@@ -279,7 +279,7 @@ export class Player {
   }
 
   getPose(): PlayerPose {
-    return { x: this.mesh.position.x, z: this.mesh.position.z, ry: this.yaw, moving: this.moving };
+    return { x: this.mesh.position.x, z: this.mesh.position.z, ry: this.yaw, moving: this.moving, jump: this.jumpOffset };
   }
 }
 
@@ -289,6 +289,8 @@ export class RemotePlayer {
   private target = new THREE.Vector3();
   private targetYaw = 0;
   private moving = false;
+  private targetJump = 0;
+  private jump = 0;
   private bobTime = 0;
 
   constructor(role: PlayerRole, private heightAt: (x: number, z: number) => number) {
@@ -301,14 +303,20 @@ export class RemotePlayer {
     this.target.set(pose.x, 0, pose.z);
     this.targetYaw = pose.ry;
     this.moving = pose.moving;
+    this.targetJump = pose.jump ?? 0;
   }
 
   update(dt: number): void {
     this.mesh.position.x += (this.target.x - this.mesh.position.x) * Math.min(1, 10 * dt);
     this.mesh.position.z += (this.target.z - this.mesh.position.z) * Math.min(1, 10 * dt);
     const groundY = this.heightAt(this.mesh.position.x, this.mesh.position.z);
-    this.bobTime += dt * (this.moving ? 9 : 2.4);
-    this.mesh.position.y = groundY + (this.moving ? Math.abs(Math.sin(this.bobTime)) * 0.12 : Math.sin(this.bobTime) * 0.04);
+    this.jump += (this.targetJump - this.jump) * Math.min(1, 15 * dt);
+    if (this.jump > 0.02) {
+      this.mesh.position.y = groundY + this.jump;
+    } else {
+      this.bobTime += dt * (this.moving ? 9 : 2.4);
+      this.mesh.position.y = groundY + (this.moving ? Math.abs(Math.sin(this.bobTime)) * 0.12 : Math.sin(this.bobTime) * 0.04);
+    }
     const target = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, this.targetYaw, 0));
     this.mesh.quaternion.slerp(target, 1 - Math.exp(-10 * dt));
   }
