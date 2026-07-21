@@ -49,6 +49,7 @@ export interface PlayerPose {
   z: number;
   ry: number; // yaw
   moving: boolean;
+  jump: number; // height above ground (jump arc), 0 when grounded
 }
 
 /** Client -> server */
