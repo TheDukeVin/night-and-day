@@ -4,6 +4,11 @@ Browser-based 3D math puzzle game: three.js + TypeScript + Vite client, Node + `
 WebSocket server for two-player rooms, and a `shared/` package holding all game
 logic and level data. See README.md for the gameplay overview.
 
+**Target audience: elementary-school students.** Everything — puzzle math, UI
+text, onboarding, and difficulty pacing — must stay approachable for young
+children. Keep numbers small, introduce one new idea at a time, and always leave
+a gentle next step.
+
 ## Commands
 
 ```bash
@@ -38,7 +43,12 @@ production the WebSocket is same-origin on :8787. Stop stray servers with
   sides so 2-player mode requires collaboration (a few early tutorial levels are
   deliberately one-sided; `verify-levels` warns on these). `npm run
   verify-levels` enforces solution correctness — it must pass before a level
-  change is done.
+  change is done. The pack is **50 levels** with a deliberately gentle
+  difficulty ramp for elementary-school players: introduce concepts one at a
+  time (counting → skip-counting → both sides → groups → second color → combined
+  generators → three colors) and add extra practice levels between each new idea
+  rather than jumping in difficulty. The first and last levels set the low/high
+  bounds — new levels should slot *between* them, never exceed the finale.
 - Client screens are plain DOM overlays (`client/src/screens/`, styled by
   `client/src/style.css`); the 3D scene lives in `client/src/game/`. UI text
   targets elementary-school players: hints nudge, they don't explain solutions.
