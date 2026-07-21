@@ -119,6 +119,10 @@ export class GameController {
     canvas.addEventListener('click', this.onClick);
     canvas.addEventListener('mousemove', this.onMouseMove);
     canvas.addEventListener('mouseleave', this.onMouseLeave);
+    // Suppress the native right-click menu anywhere in the level — including over
+    // the win dialog and other DOM overlays, which sit above the canvas and so
+    // would otherwise pop the menu (stealing focus and stalling key input).
+    document.addEventListener('contextmenu', this.onContextMenu);
     document.addEventListener('pointerlockchange', this.onPointerLockChange);
 
     // Debug/test handle for driving the game programmatically.
@@ -360,6 +364,10 @@ export class GameController {
     this.pointerActive = false;
   };
 
+  private onContextMenu = (e: MouseEvent): void => {
+    e.preventDefault();
+  };
+
   private onPointerLockChange = (): void => {
     this.crosshair.classList.toggle('visible', this.isPointerLocked());
   };
@@ -558,6 +566,7 @@ export class GameController {
     this.renderer.domElement.removeEventListener('click', this.onClick);
     this.renderer.domElement.removeEventListener('mousemove', this.onMouseMove);
     this.renderer.domElement.removeEventListener('mouseleave', this.onMouseLeave);
+    document.removeEventListener('contextmenu', this.onContextMenu);
     document.removeEventListener('pointerlockchange', this.onPointerLockChange);
     if (document.pointerLockElement === this.renderer.domElement) document.exitPointerLock();
     this.crosshair.remove();
