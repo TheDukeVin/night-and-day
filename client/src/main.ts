@@ -3,6 +3,7 @@
 
 import './style.css';
 import { GameController } from './game/level.ts';
+import { runCutscene } from './game/cutscene.ts';
 import { LoopbackChannel, SocketChannel, type GameChannel } from './net/client.ts';
 import { LEVEL_COUNT, STARTER_LEVELS, STARTER_PACK_ID, STARTER_PACK_NAME } from '../../shared/levels.ts';
 import type { ServerMsg } from '../../shared/types.ts';
@@ -332,6 +333,15 @@ function showCredits(): void {
   ]);
 }
 
+// `/cutscene` is a standalone viewer that just loops the opening cutscene —
+// handy for watching the animation without starting a game.
+if (window.location.pathname.replace(/\/+$/, '') === '/cutscene') {
+  runCutscene();
+} else {
+  boot();
+}
+
+function boot(): void {
 mountCornerControls();
 
 getCurrentUser().then(async (user) => {
@@ -341,3 +351,4 @@ getCurrentUser().then(async (user) => {
   if (user) showTitle();
   else showAuth();
 });
+}

@@ -18,7 +18,6 @@ import { el, uiRoot } from '../screens/ui.ts';
 const DESCENT_END = 12.5;
 /** When the player is comfortably in frame and may start walking. */
 const CONTROL_AT = 9.4;
-const TITLE_AT = 8.2;
 const PACK_AT = 9.0;
 const TITLES_OUT_AT = 12.2;
 const END = 13.6;
@@ -43,15 +42,56 @@ interface PairSpec {
   meetY: number;
 }
 
+const COLORS: CrystalColor[] = ['red', 'blue', 'green', 'yellow', 'purple'];
+/** Total day/night pairs in the show. */
+const PAIR_COUNT = 20;
+/** The rush of pairs after the solo opener sweeps in between these seconds... */
+const RUSH_START = 3.4;
+const RUSH_END = 8.2;
+/** ...packing tighter as it goes (>1 bunches the later pairs together, so they
+ *  arrive at an ever-increasing rate). */
+const RUSH_ACCEL = 2.6;
+/** Seconds a pair spends flying in before its two halves meet and annihilate. */
+const TRAVEL = 1.4;
+/** The last pair's entrance is the cue for the title, so it lands on the beat. */
+const TITLE_AT = RUSH_END;
+
+/** Small seeded PRNG so the scatter of meeting points is varied but stable. */
+function mulberry32(seed: number): () => number {
+  return () => {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 // The red pair goes first and alone, so the day-then-night-then-annihilate idea
-// lands before the rest of the colors pile in.
-const PAIRS: PairSpec[] = [
-  { color: 'red', dayAt: 0.6, nightAt: 1.7, meetAt: 3.1, meetX: 0, meetY: 0.6 },
-  { color: 'blue', dayAt: 3.5, nightAt: 3.7, meetAt: 5.0, meetX: -4.6, meetY: -1.8 },
-  { color: 'green', dayAt: 4.4, nightAt: 4.6, meetAt: 5.9, meetX: 4.2, meetY: 2.6 },
-  { color: 'yellow', dayAt: 5.3, nightAt: 5.5, meetAt: 6.8, meetX: -2.4, meetY: 2.0 },
-  { color: 'purple', dayAt: 6.2, nightAt: 6.4, meetAt: 7.7, meetX: 3.4, meetY: -1.4 },
-];
+// lands before the rest of the colors pile in; the remaining pairs then rush in
+// at an accelerating rate, scattered across the stage.
+function buildPairs(): PairSpec[] {
+  const pairs: PairSpec[] = [
+    { color: 'red', dayAt: 0.6, nightAt: 1.7, meetAt: 3.1, meetX: 0, meetY: 0.6 },
+  ];
+  const rng = mulberry32(0x4e696774); // "Nigt"
+  const rush = PAIR_COUNT - 1;
+  for (let i = 0; i < rush; i++) {
+    const u = rush === 1 ? 1 : i / (rush - 1);
+    const dayAt = RUSH_START + (RUSH_END - RUSH_START) * (1 - Math.pow(1 - u, RUSH_ACCEL));
+    pairs.push({
+      color: COLORS[i % COLORS.length],
+      dayAt,
+      nightAt: dayAt + 0.12,
+      meetAt: dayAt + TRAVEL,
+      meetX: (rng() - 0.5) * 13,
+      meetY: (rng() - 0.5) * 7,
+    });
+  }
+  return pairs;
+}
+
+const PAIRS: PairSpec[] = buildPairs();
 
 interface Flier {
   root: THREE.Group;
