@@ -6,3 +6,7 @@ client/dist/
 .claude/worktrees/
 .env
 server/data/
+
+# Python puzzle-explorer artifacts
+__pycache__/
+tools/*.png
