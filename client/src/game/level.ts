@@ -3,8 +3,8 @@
 
 import * as THREE from 'three';
 import { getLevel, LEVEL_COUNT } from '../../../shared/levels.ts';
-import { currentCounts, generatorLabel, undoIndexFor } from '../../../shared/logic.ts';
-import type { GameState, LevelDef, ServerMsg } from '../../../shared/types.ts';
+import { activeSide, currentCounts, generatorLabel, isCycle, undoIndexFor } from '../../../shared/logic.ts';
+import type { GameState, LevelDef, ServerMsg, Side } from '../../../shared/types.ts';
 import type { GameChannel } from '../net/client.ts';
 import { getSettings } from '../settings.ts';
 import { Hud } from '../screens/hud.ts';
@@ -19,11 +19,13 @@ import { IntroSequence } from './intro.ts';
 import { Player, RemotePlayer } from './player.ts';
 import { hasSeenMechanic } from '../mechanics.ts';
 import { Tutorial } from './tutorial.ts';
+import { Walkthrough } from './walkthrough.ts';
 import { World } from './world.ts';
+import type { Atmosphere } from './world.ts';
 
 const INTERACT_RANGE = 8;
 
-type LevelBuildState = { presses: Record<string, number>; history: string[] };
+type LevelBuildState = { presses: Record<string, number>; history: string[]; phase: number };
 
 export class GameController {
   private renderer: THREE.WebGLRenderer;
@@ -37,9 +39,12 @@ export class GameController {
   private hud: Hud;
   private tutorial: Tutorial;
   private guides: Guides;
+  private walkthrough: Walkthrough;
   private myPresses = 0;
   private myBalances = 0;
   private level: LevelDef | null = null;
+  /** Current cycle phase (0 for Sunset levels); drives the active side. */
+  private phase = 0;
   /** Target level captured while the previous one's generators sink away. */
   private pendingLevel: { index: number; state: LevelBuildState } | null = null;
   private lastPresses: Record<string, number> = {};
@@ -91,6 +96,7 @@ export class GameController {
     this.hud = new Hud(
       channel.role,
       () => this.requestBalance(),
+      () => this.requestPass(),
       () => this.requestUndo(),
       () => this.requestReset(),
       () => this.quit()
@@ -109,6 +115,13 @@ export class GameController {
       balanceButton: this.hud.balanceButton,
     });
     uiRoot().append(this.guides.root);
+
+    this.walkthrough = new Walkthrough({
+      standAnchor: (id) => this.standAnchor(id),
+      primaryButton: this.hud.balanceButton,
+    });
+    this.walkthrough.setWatch(() => ({ presses: this.lastPresses, phase: this.phase }));
+    uiRoot().append(this.walkthrough.root);
 
     this.crosshair = el('div', { className: 'crosshair' });
     uiRoot().append(this.crosshair);
@@ -131,7 +144,7 @@ export class GameController {
     if (introPack !== undefined) this.startIntro(introPack);
 
     this.tutorial.onGameStart();
-    this.loadLevel(startLevel, { presses: {}, history: [] });
+    this.loadLevel(startLevel, { presses: {}, history: [], phase: 0 });
     this.lastTime = performance.now();
     requestAnimationFrame(this.frame);
   }
@@ -142,6 +155,7 @@ export class GameController {
     // Everything that would talk over the cutscene waits for it to end.
     this.tutorial.setPaused(true);
     this.guides.setPaused(true);
+    this.walkthrough.setPaused(true);
     this.hud.root.style.display = 'none';
     this.player.cameraEnabled = false;
     this.player.controlsEnabled = false;
@@ -170,6 +184,7 @@ export class GameController {
     // remaining tips queue up behind it.
     this.tutorial.setPaused(false);
     this.guides.setPaused(false);
+    this.walkthrough.setPaused(false);
     if (this.pendingIntroToast) {
       showToast(this.pendingIntroToast, 9);
       this.pendingIntroToast = null;
@@ -199,7 +214,9 @@ export class GameController {
           if (--remaining === 0 && this.pendingLevel) {
             const p = this.pendingLevel;
             this.pendingLevel = null;
-            this.buildLevel(p.index, p.state);
+            // A real level-to-level change: cross-fade the sky into the new
+            // level's mood as its generators rise (first load snaps instead).
+            this.buildLevel(p.index, p.state, true);
           }
         })
       );
@@ -212,10 +229,15 @@ export class GameController {
     }
   }
 
-  private buildLevel(index: number, state: LevelBuildState): void {
+  private buildLevel(index: number, state: LevelBuildState, animateAtmo = false): void {
     this.level = getLevel(index);
     this.lastPresses = { ...state.presses };
+    this.phase = state.phase;
     this.busy = false;
+
+    // Move the atmosphere to this level's starting mood. On the first load there
+    // is nothing to fade from so we snap; moving between levels cross-fades.
+    this.world.setAtmosphere(this.atmosphereFor(), animateAtmo);
 
     this.levelGroup.clear();
     clearTweens();
@@ -226,16 +248,19 @@ export class GameController {
       this.levelGroup.add(stand.root);
       stand.riseIn(i * 0.08); // rise out of the ground, cage/sign appearing after
     });
+    this.refreshActiveStands();
     // Collisions turn on with the pedestals; crystals stay pass-through.
     this.player.setColliders(
       this.stands.map((s) => ({ x: s.root.position.x, z: s.root.position.z, radius: PEDESTAL_COLLIDER_RADIUS }))
     );
 
     this.hud.setLevel(this.level);
+    this.hud.setTurn(this.level, this.makeState(state.presses, state.history));
     const counts = currentCounts(this.level, state.presses);
     this.field.setCounts(counts);
     this.hud.setCounts(counts);
     this.updateUndoAvailability(state.history);
+    this.walkthrough.setLevel(this.level);
 
     // Skip the level's own intro toast for a player still meeting the mechanics
     // (goal tip unseen): the guidance covers orientation and the toast would
@@ -245,11 +270,44 @@ export class GameController {
       if (this.intro) this.pendingIntroToast = this.level.intro;
       else showToast(this.level.intro, 9);
     }
-    if (this.stands.some((s) => this.canPress(s))) this.guides.unlock('press');
+    // On Tutorial levels the scripted walkthrough owns all guidance, so the
+    // generic press/balance coach marks are suppressed to avoid double cues.
+    if (!this.level.tutorial && this.stands.some((s) => this.canPress(s))) this.guides.unlock('press');
     this.tutorial.onLevelWithGenerators();
     if (this.level.generators.some((g) => g.outputs.length > 1 || g.outputs[0].count > 1)) {
       this.tutorial.onFirstMultiOutput();
     }
+  }
+
+  /** Build a full GameState from the pieces the controller tracks. */
+  private makeState(presses: Record<string, number>, history: string[]): GameState {
+    return {
+      levelIndex: this.level?.index ?? 1,
+      presses,
+      history,
+      phase: this.phase,
+      resets: 0,
+      hintTaken: false,
+      solved: false,
+    };
+  }
+
+  /** The side allowed to act right now (null on Sunset levels — both sides). */
+  private currentActiveSide(): Side | null {
+    if (!this.level) return null;
+    return activeSide(this.level, this.makeState(this.lastPresses, []));
+  }
+
+  /** Atmosphere this level should show at the current phase. */
+  private atmosphereFor(): Atmosphere {
+    if (!this.level || !isCycle(this.level)) return 'sunset';
+    return this.currentActiveSide() as Atmosphere;
+  }
+
+  /** Light up the active side's generators and dim the resting side's. */
+  private refreshActiveStands(): void {
+    const active = this.currentActiveSide();
+    for (const s of this.stands) s.setActive(active === null || s.def.side === active);
   }
 
   private applyState(state: GameState): void {
@@ -271,11 +329,19 @@ export class GameController {
       }
     }
     const wasReset = Object.keys(state.presses).length === 0 && Object.keys(this.lastPresses).length > 0;
+    const phaseChanged = state.phase !== this.phase;
+    this.phase = state.phase;
     this.lastPresses = { ...state.presses };
     const counts = currentCounts(this.level, state.presses);
     this.field?.setCounts(counts, spawnPoints);
     this.hud.setCounts(counts);
     this.updateUndoAvailability(state.history);
+
+    // A pass (or reset back to phase 0) changes whose turn it is: cross-fade the
+    // atmosphere, relight the active side, and retarget the primary button.
+    if (phaseChanged) this.world.setAtmosphere(this.atmosphereFor(), true);
+    this.refreshActiveStands();
+    this.hud.setTurn(this.level, state);
 
     const balanced = Object.values(counts).every((c) => c.day === c.night);
     if (balanced && !state.solved) this.tutorial.onFirstBalanceReady();
@@ -289,7 +355,8 @@ export class GameController {
   /** Undo is offered whenever this player has a press of their own to take back. */
   private updateUndoAvailability(history: string[]): void {
     this.hud.setCanUndo(
-      this.level !== null && undoIndexFor(this.level, this.channel.role, history) >= 0
+      this.level !== null &&
+        undoIndexFor(this.level, this.channel.role, history, this.makeState(this.lastPresses, history)) >= 0
     );
   }
 
@@ -301,9 +368,32 @@ export class GameController {
     this.channel.send({ t: 'balance' });
   }
 
-  /** Generators this player is allowed to press (Dusk may press any). */
+  private requestPass(): void {
+    if (this.busy) return;
+    this.channel.send({ t: 'pass' });
+  }
+
+  /**
+   * Generators this player may press right now: their own side (Dusk owns both),
+   * and — on Cycle levels — only while that side is the active one.
+   */
   private canPress(stand: GeneratorStand): boolean {
-    return this.channel.role === 'dusk' || this.channel.role === stand.def.side;
+    const mine = this.channel.role === 'dusk' || this.channel.role === stand.def.side;
+    if (!mine) return false;
+    const active = this.currentActiveSide();
+    return active === null || stand.def.side === active;
+  }
+
+  /** Screen position of a specific generator (for the tutorial walkthrough). */
+  private standAnchor(genId: string): { x: number; y: number } | null {
+    const stand = this.stands.find((s) => s.def.id === genId);
+    if (!stand) return null;
+    const at = stand.root.position.clone().setY(stand.root.position.y + 2.4).project(this.camera);
+    if (at.z > 1 || Math.abs(at.x) > 1 || Math.abs(at.y) > 1) return null;
+    return {
+      x: ((at.x + 1) / 2) * window.innerWidth,
+      y: ((1 - at.y) / 2) * window.innerHeight,
+    };
   }
 
   /**
@@ -384,7 +474,7 @@ export class GameController {
       const ndc = locked ? new THREE.Vector2(0, 0) : this.pointer;
       this.raycaster.setFromCamera(ndc, this.camera);
       for (const stand of this.stands) {
-        if (!stand.isSolid()) continue;
+        if (!stand.isSolid() || !stand.isActive()) continue;
         if (this.raycaster.intersectObjects(stand.clickTargets, false).length > 0) {
           hovered = stand;
           break;
@@ -409,7 +499,8 @@ export class GameController {
         );
     this.raycaster.setFromCamera(ndc, this.camera);
     for (const stand of this.stands) {
-      if (!stand.isSolid()) continue;
+      // Dimmed (inactive-side, cycle) stands are not clickable at all.
+      if (!stand.isSolid() || !stand.isActive()) continue;
       const hits = this.raycaster.intersectObjects(stand.clickTargets, false);
       if (hits.length === 0) continue;
       const dist = stand.root.position.distanceTo(this.player.mesh.position);
@@ -419,16 +510,22 @@ export class GameController {
       }
       if (!this.canPress(stand)) {
         stand.deny();
-        showToast(
-          this.channel.role === 'day'
-            ? 'That is a night generator — only Night can press it. Team up!'
-            : 'That is a day generator — only Day can press it. Team up!',
-          4
-        );
+        const active = this.currentActiveSide();
+        if (active !== null) {
+          // Cycle level, wrong turn: gentle "wait your turn" nudge.
+          showToast(`It's ${active === 'day' ? 'Day' : 'Night'}'s turn right now — hold on!`, 4);
+        } else {
+          showToast(
+            this.channel.role === 'day'
+              ? 'That is a night generator — only Night can press it. Team up!'
+              : 'That is a day generator — only Day can press it. Team up!',
+            4
+          );
+        }
         return;
       }
       this.myPresses++;
-      this.guides.unlock('balance');
+      if (!this.level?.tutorial) this.guides.unlock('balance');
       this.channel.send({ t: 'press', gen: stand.def.id });
       return;
     }
@@ -535,10 +632,12 @@ export class GameController {
     this.player.update(dt);
     this.remote?.update(dt);
     this.field?.update(dt);
+    this.world.update(dt, this.player.mesh.position);
     for (const stand of this.stands) stand.update(dt, this.camera);
     this.intro?.update();
     this.updateHover();
     this.guides.update();
+    this.walkthrough.update();
     updateTweens(dt);
     this.renderer.render(this.world.scene, this.camera);
     requestAnimationFrame(this.frame);
@@ -572,6 +671,7 @@ export class GameController {
     this.crosshair.remove();
     this.renderer.domElement.style.cursor = '';
     this.guides.dispose();
+    this.walkthrough.dispose();
     this.player.dispose();
     this.channel.close();
     clearTweens();

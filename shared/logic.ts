@@ -1,9 +1,35 @@
 // Pure game logic shared by client (single-player) and server (two-player).
 
-import type { CrystalCounts, GameState, LevelDef, PlayerRole } from './types.ts';
+import type { CrystalCounts, GameState, LevelDef, PlayerRole, Side } from './types.ts';
 
 export function initialGameState(levelIndex: number): GameState {
-  return { levelIndex, presses: {}, history: [], resets: 0, hintTaken: false, solved: false };
+  return { levelIndex, presses: {}, history: [], phase: 0, resets: 0, hintTaken: false, solved: false };
+}
+
+/** True for "Cycle" levels, where sides take turns and one passes to the next. */
+export function isCycle(level: LevelDef): boolean {
+  return !!level.cycle && level.cycle.length > 0;
+}
+
+/**
+ * Which side may act right now. Non-cycle (Sunset) levels return null — both
+ * sides are always free. Cycle levels return the side for the current phase,
+ * clamped to the last phase (where Balance happens).
+ */
+export function activeSide(level: LevelDef, state: GameState): Side | null {
+  if (!isCycle(level)) return null;
+  const cycle = level.cycle!;
+  return cycle[Math.min(state.phase, cycle.length - 1)];
+}
+
+/** May the active side still pass (i.e. there is a later phase to hand off to)? */
+export function canPass(level: LevelDef, state: GameState): boolean {
+  return isCycle(level) && state.phase < level.cycle!.length - 1;
+}
+
+/** Advance to the next cycle phase, handing control to the next side. */
+export function applyPass(state: GameState): GameState {
+  return { ...state, phase: state.phase + 1 };
 }
 
 /** Crystal counts implied by the level's initial layout plus all generator presses. */
@@ -23,11 +49,17 @@ export function currentCounts(level: LevelDef, presses: Record<string, number>):
   return counts;
 }
 
-/** May this role press this generator? Dusk (single-player) may press both sides. */
-export function canPress(level: LevelDef, role: PlayerRole, genId: string): boolean {
+/**
+ * May this role press this generator right now? Dusk (single-player) owns both
+ * sides. On cycle levels, only the currently-active side may press — this holds
+ * even for Dusk, which is the whole point of the mechanic in single-player.
+ */
+export function canPress(level: LevelDef, role: PlayerRole, genId: string, state: GameState): boolean {
   const gen = level.generators.find((g) => g.id === genId);
   if (!gen) return false;
-  return role === 'dusk' || role === gen.side;
+  if (role !== 'dusk' && role !== gen.side) return false;
+  const active = activeSide(level, state);
+  return active === null || gen.side === active;
 }
 
 export function applyPress(state: GameState, genId: string): GameState {
@@ -45,9 +77,14 @@ export function applyPress(state: GameState, genId: string): GameState {
  * history — either player can undo without waiting on the other. Dusk owns every
  * generator, so in single-player this is simply the last press.
  */
-export function undoIndexFor(level: LevelDef, role: PlayerRole, history: string[]): number {
+export function undoIndexFor(
+  level: LevelDef,
+  role: PlayerRole,
+  history: string[],
+  state: GameState
+): number {
   for (let i = history.length - 1; i >= 0; i--) {
-    if (canPress(level, role, history[i])) return i;
+    if (canPress(level, role, history[i], state)) return i;
   }
   return -1;
 }
@@ -69,7 +106,7 @@ export function isBalanced(level: LevelDef, presses: Record<string, number>): bo
 }
 
 export function applyReset(state: GameState): GameState {
-  return { ...state, presses: {}, history: [], resets: state.resets + 1 };
+  return { ...state, presses: {}, history: [], phase: 0, resets: state.resets + 1 };
 }
 
 /**

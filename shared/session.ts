@@ -4,9 +4,12 @@
 
 import { getLevel, LEVEL_COUNT } from './levels.ts';
 import {
+  activeSide,
+  applyPass,
   applyPress,
   applyReset,
   applyUndo,
+  canPass,
   canPress,
   initialGameState,
   isBalanced,
@@ -30,14 +33,27 @@ export class GameSession {
     switch (msg.t) {
       case 'press': {
         if (this.state.solved) return [];
-        if (!canPress(level, role, msg.gen)) {
+        if (!canPress(level, role, msg.gen, this.state)) {
           return [{ t: 'error', message: 'That generator belongs to the other player!' }];
         }
         this.state = applyPress(this.state, msg.gen);
         return [{ t: 'state', state: this.state }];
       }
+      case 'pass': {
+        if (this.state.solved) return [];
+        if (!canPass(level, this.state)) return [];
+        // Only the currently-active side may hand off (Dusk owns both sides).
+        if (role !== 'dusk' && role !== activeSide(level, this.state)) {
+          return [{ t: 'error', message: 'It is the other side’s turn!' }];
+        }
+        this.state = applyPass(this.state);
+        return [{ t: 'state', state: this.state }];
+      }
       case 'balance': {
         if (this.state.solved) return [];
+        // On cycle levels, Balance is only valid at the final phase; earlier
+        // phases show "Pass" instead, so guard against a stray early balance.
+        if (canPass(level, this.state)) return [];
         const win = isBalanced(level, this.state.presses);
         if (win) this.state = { ...this.state, solved: true };
         return [{ t: 'balance-result', win, state: this.state }];
@@ -45,8 +61,9 @@ export class GameSession {
       case 'undo': {
         if (this.state.solved) return [];
         // Undoes this player's own most recent press; the other side's presses
-        // are a separate stack and are left untouched.
-        const index = undoIndexFor(level, role, this.state.history);
+        // are a separate stack and are left untouched. On cycle levels this is
+        // limited to the active side's current-phase presses.
+        const index = undoIndexFor(level, role, this.state.history, this.state);
         if (index < 0) return [];
         this.state = applyUndo(this.state, index);
         return [{ t: 'state', state: this.state }];

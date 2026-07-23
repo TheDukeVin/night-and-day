@@ -25,12 +25,23 @@ export interface LevelDef {
   /** Intended solution: presses per generator id. Verified by shared/verify.ts. */
   solution: Record<string, number>;
   intro?: string; // tutorial / flavor text shown when the level starts
+  /**
+   * Cycle levels: the ordered list of active sides. Presence marks the level as
+   * a "Cycle" puzzle — only the active side may press, and the active player
+   * passes to advance. The LAST entry is the phase where Balance appears; earlier
+   * entries show "Pass to <next>". Absence = a "Sunset" level (both sides free).
+   * e.g. Cycle Night = ['night','day'], Cycle Day = ['day','night'].
+   */
+  cycle?: Side[];
+  /** Run the scripted, replaying solution walkthrough (Tutorial levels). */
+  tutorial?: boolean;
 }
 
 export interface GameState {
   levelIndex: number; // 1-based index into the pack
   presses: Record<string, number>; // generator id -> press count
   history: string[]; // generator ids in press order, so the last press can be undone
+  phase: number; // cycle levels: index into level.cycle (which side is active); 0 otherwise
   resets: number; // resets since last hint was taken (drives answer offer)
   hintTaken: boolean;
   solved: boolean;
@@ -61,6 +72,7 @@ export type ClientMsg =
   // either player is new to the pack.
   | { t: 'begin'; level: number; intro?: boolean }
   | { t: 'press'; gen: string }
+  | { t: 'pass' } // cycle levels: active side hands off to the next side
   | { t: 'balance' }
   | { t: 'undo' }
   | { t: 'reset' }

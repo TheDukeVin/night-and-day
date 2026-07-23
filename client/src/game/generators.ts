@@ -44,6 +44,15 @@ export class GeneratorStand {
   private solid = false;
   /** Day-side cage edges, re-tinted each frame by how bright the sky behind is. */
   private dayScaffolds: THREE.LineSegments[] = [];
+  /**
+   * Cycle levels dim generators on the resting (non-active) side and make them
+   * unclickable. Sunset levels keep every stand active. See `setActive`.
+   */
+  private active = true;
+  private stoneMat!: THREE.MeshStandardMaterial;
+  private stoneBase = new THREE.Color();
+  private stoneDim = new THREE.Color();
+  private scaffoldMats: { mat: THREE.LineBasicMaterial; base: THREE.Color; dim: THREE.Color }[] = [];
 
   constructor(def: GeneratorDef, position: THREE.Vector3) {
     this.def = def;
@@ -56,6 +65,9 @@ export class GeneratorStand {
       roughness: 0.8,
       flatShading: true,
     });
+    this.stoneMat = stoneMat;
+    this.stoneBase.copy(stoneMat.color);
+    this.stoneDim.copy(stoneMat.color).multiplyScalar(0.42);
 
     const base = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.9, 0.6, 8), stoneMat);
     base.position.y = 0.3;
@@ -127,6 +139,11 @@ export class GeneratorStand {
       const scaffoldMat = new THREE.LineBasicMaterial({ color: hex });
       const scaffold = new THREE.LineSegments(SCAFFOLD_GEO, scaffoldMat);
       slot.add(scaffold);
+      this.scaffoldMats.push({
+        mat: scaffoldMat,
+        base: scaffoldMat.color.clone(),
+        dim: scaffoldMat.color.clone().multiplyScalar(0.4),
+      });
       if (isDay) {
         // Same hue, deeper and more saturated: still obviously "the red cage",
         // but dark enough to hold its own against the sky.
@@ -175,8 +192,29 @@ export class GeneratorStand {
     this.root.position.y = this.groundY - SINK_DEPTH;
   }
 
+  /**
+   * Cycle levels call this to light up the active side and grey out the resting
+   * one. Inactive stands are dimmed (stone, cage edges, ring, sign) and are
+   * skipped by hover/click (see `GameController`). Sunset levels leave every
+   * stand active.
+   */
+  setActive(active: boolean): void {
+    this.active = active;
+    (this.ring.material as THREE.MeshBasicMaterial).opacity = active ? 0.9 : 0.1;
+    this.stoneMat.color.copy(active ? this.stoneBase : this.stoneDim);
+    for (const s of this.scaffoldMats) s.mat.color.copy(active ? s.base : s.dim);
+    (this.sign.material as THREE.SpriteMaterial).opacity = active ? 1 : 0.3;
+    if (!active) this.outline.visible = false;
+  }
+
+  /** Whether this generator is currently the active side (always true on Sunset). */
+  isActive(): boolean {
+    return this.active;
+  }
+
   /** Toggle the white hover outline. */
   setHovered(on: boolean): void {
+    if (!this.active) return;
     this.outline.visible = on;
   }
 
@@ -292,11 +330,13 @@ export class GeneratorStand {
 
   update(dt: number, camera?: THREE.Camera): void {
     this.time += dt;
-    if (camera) this.shadeCrownForSky(camera);
+    // While dimmed, skip the per-frame ring pulse and sky re-tint so they don't
+    // fight the deactivated colours set in `setActive`.
+    if (this.active && camera) this.shadeCrownForSky(camera);
     this.crown.rotation.y += dt * 0.9;
     this.crown.position.y = 3.2 + Math.sin(this.time * 1.8) * 0.15;
     const ringMat = this.ring.material as THREE.MeshBasicMaterial;
-    ringMat.opacity = 0.65 + Math.sin(this.time * 2.4) * 0.25;
+    if (this.active) ringMat.opacity = 0.65 + Math.sin(this.time * 2.4) * 0.25;
     for (const child of this.root.children) {
       const orbit = child.userData.orbit;
       if (orbit) {

@@ -54,12 +54,33 @@ production the WebSocket is same-origin on :8787. Stop stray servers with
   sides so 2-player mode requires collaboration (a few early tutorial levels are
   deliberately one-sided; `verify-levels` warns on these). `npm run
   verify-levels` enforces solution correctness — it must pass before a level
-  change is done. The pack is **50 levels** with a deliberately gentle
-  difficulty ramp for elementary-school players: introduce concepts one at a
-  time (counting → skip-counting → both sides → groups → second color → combined
-  generators → three colors) and add extra practice levels between each new idea
-  rather than jumping in difficulty. The first and last levels set the low/high
-  bounds — new levels should slot *between* them, never exceed the finale.
+  change is done. The pack is **40 levels** (two colors, red + blue) with a
+  deliberately gentle difficulty ramp for elementary-school players: introduce
+  concepts one at a time (counting → skip-counting → both sides → groups →
+  second color → combined generators → the Cycle mechanic) and add extra
+  practice levels between each new idea rather than jumping in difficulty. The
+  first and last levels set the low/high bounds — new levels should slot
+  *between* them, never exceed the finale. Level layout mirrors
+  `~/Downloads/Levels - Sheet1.csv`.
+- **Two puzzle styles, chosen per level by the optional `cycle` field on
+  `LevelDef`:**
+  - **Sunset** (no `cycle`): both sides act freely at once; either player may
+    press **Balance** whenever the sides match. The original behavior.
+  - **Cycle** (`cycle: Side[]`, e.g. `['night','day']` = Cycle Night,
+    `['day','night']` = Cycle Day): only the *active* side may press; its
+    generators light up while the resting side's are dimmed and unclickable. The
+    active player presses **"Pass to <side>"** (which replaces Balance) to hand
+    off; the final phase shows Balance. The active side is *derived* from an
+    authoritative `phase` counter on `GameState` (advanced by the new `pass`
+    intent, reset by `reset`), so both networked clients — and the atmosphere —
+    stay in sync. Shared helpers: `isCycle`, `activeSide`, `canPass`, `applyPass`
+    (`shared/logic.ts`); `canPress`/`undoIndexFor` now take `state` and gate on
+    the active side. `verify-levels` checks cycle turn order covers both sides.
+  The **world atmosphere** tracks the active side (`client/src/game/world.ts`,
+  `World.setAtmosphere`/`update`): **night** = dark sky with stars + fireflies
+  drifting near the player; **day** = bright sky with a sun that arcs so shadows
+  sweep across the ground; **sunset** = the original dusk look for Sunset levels.
+  It cross-fades on each pass. `GeneratorStand.setActive` dims/undims a pedestal.
 - Client screens are plain DOM overlays (`client/src/screens/`, styled by
   `client/src/style.css`); the 3D scene lives in `client/src/game/`. UI text
   targets elementary-school players: hints nudge, they don't explain solutions.
@@ -91,6 +112,14 @@ production the WebSocket is same-origin on :8787. Stop stray servers with
     intentionally removed; the visual cues teach those.
   Both pause/resume with the intro cutscene and respect `settings.showTutorials`
   and `prefers-reduced-motion`.
+- **Tutorial levels** (`tutorial: true` on `LevelDef` — sheet levels 1, 2, 14,
+  15) run a *scripted* solution walkthrough (`client/src/game/walkthrough.ts`),
+  separate from the once-per-account coach marks: it reads the level's stored
+  `solution` + `cycle` order and points at each generator to press (with a "N×"
+  count badge), then "Pass to …", then "Balance". Unlike the guides it is **not**
+  seen-set-gated — it **replays every visit** (still respecting
+  `settings.showTutorials`). Generic press/balance coach marks are suppressed on
+  these levels so cues don't double up.
 
 ## Conventions
 

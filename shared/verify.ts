@@ -21,6 +21,19 @@ for (const level of STARTER_LEVELS) {
   for (const g of level.generators) {
     if (!(g.id in level.solution)) problems.push(`generator ${g.id} missing from solution (use 0 if unused)`);
   }
+  // Cycle levels: the turn order must be valid and cover both sides.
+  if (level.cycle !== undefined) {
+    if (level.cycle.length === 0) problems.push('cycle is empty (omit `cycle` for a Sunset level)');
+    for (const s of level.cycle) {
+      if (s !== 'day' && s !== 'night') problems.push(`cycle has invalid side ${JSON.stringify(s)}`);
+    }
+    const cycleSides = new Set(level.cycle);
+    for (const g of level.generators) {
+      if (!cycleSides.has(g.side)) problems.push(`generator ${g.id} is on ${g.side}, which never becomes active in the cycle`);
+    }
+    const genSides = new Set(level.generators.map((g) => g.side));
+    if (genSides.size < 2) problems.push('cycle level must have generators on both sides');
+  }
   // In a 2-player game both players ideally participate. A few early tutorial
   // levels are deliberately one-sided, so this is a warning, not a failure.
   if (level.index > 1) {
