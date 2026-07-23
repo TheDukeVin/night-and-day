@@ -237,11 +237,13 @@ export class GameController {
 
     // Move the atmosphere to this level's starting mood. On the first load there
     // is nothing to fade from so we snap; moving between levels cross-fades.
-    this.world.setAtmosphere(this.atmosphereFor(), animateAtmo);
+    const mode = this.atmosphereFor();
+    this.world.setAtmosphere(mode, animateAtmo);
 
     this.levelGroup.clear();
     clearTweens();
     this.field = new CrystalField(this.level, this.world.heightAt);
+    this.field.setAtmosphere(mode, animateAtmo);
     this.levelGroup.add(this.field.group);
     this.stands = buildGenerators(this.level, this.world.heightAt);
     this.stands.forEach((stand, i) => {
@@ -339,7 +341,11 @@ export class GameController {
 
     // A pass (or reset back to phase 0) changes whose turn it is: cross-fade the
     // atmosphere, relight the active side, and retarget the primary button.
-    if (phaseChanged) this.world.setAtmosphere(this.atmosphereFor(), true);
+    if (phaseChanged) {
+      const mode = this.atmosphereFor();
+      this.world.setAtmosphere(mode, true);
+      this.field?.setAtmosphere(mode, true);
+    }
     this.refreshActiveStands();
     this.hud.setTurn(this.level, state);
 

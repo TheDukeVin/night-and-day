@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import type { CrystalColor, CrystalCounts, LevelDef, Side } from '../../../shared/types.ts';
 import { easeInOut, easeOutBack, tween } from './anim.ts';
+import type { Atmosphere } from './world.ts';
 
 export const COLOR_HEX: Record<CrystalColor, { day: number; night: number; ui: string }> = {
   red: { day: 0xff6b5e, night: 0x7a1f33, ui: '#ff6b5e' },
@@ -19,6 +20,13 @@ export const NIGHT_PLATFORM_X = 10;
 
 export const CRYSTAL_RADIUS = 0.55;
 const CRYSTAL_GEO = new THREE.IcosahedronGeometry(CRYSTAL_RADIUS, 0);
+/** Facet outlines, used to rim night crystals so they read against the dark sky. */
+const CRYSTAL_EDGES_GEO = new THREE.EdgesGeometry(CRYSTAL_GEO);
+
+/** A pale, high-key version of a color — bright enough to glow at night. */
+function edgeColor(color: CrystalColor): THREE.Color {
+  return new THREE.Color(COLOR_HEX[color].day).lerp(new THREE.Color(0xffffff), 0.5);
+}
 
 /** Where a freshly generated crystal materializes: a generator's crown scaffold. */
 export interface SpawnPoint {
@@ -87,6 +95,42 @@ export function makeCrystalMesh(color: CrystalColor, side: Side): THREE.Group {
     halo.userData.baseOpacity = 0.45;
     group.add(halo);
   } else {
+    // Bright facet outlines: under a night sky the dark body would otherwise
+    // vanish, so the silhouette is drawn in a pale tint of the color. These
+    // only show in the night atmosphere — `CrystalField.setAtmosphere` fades
+    // them out for sunset and day, where the plain dark crystal reads fine.
+    const bright = edgeColor(color);
+    const edges = new THREE.LineSegments(
+      CRYSTAL_EDGES_GEO,
+      new THREE.LineBasicMaterial({ color: bright, transparent: true, opacity: 0.95, depthWrite: false })
+    );
+    edges.scale.setScalar(1.02);
+    // Off until the field's update lights them (so a crystal born under a
+    // sunset sky, or one in the intro cutscene, never flashes its edges).
+    edges.visible = false;
+    edges.userData.edges = true;
+    edges.userData.baseOpacity = 0.95;
+    group.add(edges);
+
+    // Faint backface shell so the outline blooms a little, like moonlight
+    // catching the crystal's rim.
+    const rim = new THREE.Mesh(
+      CRYSTAL_GEO,
+      new THREE.MeshBasicMaterial({
+        color: bright,
+        side: THREE.BackSide,
+        transparent: true,
+        opacity: 0.22,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    rim.scale.setScalar(1.14);
+    rim.visible = false;
+    rim.userData.rim = true;
+    rim.userData.baseOpacity = 0.22;
+    group.add(rim);
+
     // Tiny star specks that twinkle, as if the crystal holds a night sky.
     const starMat = new THREE.MeshBasicMaterial({ color: 0xeef2ff });
     for (let i = 0; i < 4; i++) {
@@ -126,6 +170,9 @@ export class CrystalField {
   private clusters = new Map<string, Cluster>();
   private time = 0;
   private colors: CrystalColor[];
+  /** 0 = no night-crystal edge highlight, 1 = full. Eased toward `edgeTarget`. */
+  private edgeFade = 0;
+  private edgeTarget = 0;
 
   constructor(
     private level: LevelDef,
@@ -291,6 +338,16 @@ export class CrystalField {
     }
   }
 
+  /**
+   * Night crystals only wear their bright edges under the night sky; sunset and
+   * day keep the original dark look. Follows the world's cross-fade (pass
+   * `animate` false on a fresh level load, which snaps like the sky does).
+   */
+  setAtmosphere(mode: Atmosphere, animate = true): void {
+    this.edgeTarget = mode === 'night' ? 1 : 0;
+    if (!animate) this.edgeFade = this.edgeTarget;
+  }
+
   /** Positions used by the balance animation. */
   getClusters(): { color: CrystalColor; side: Side; crystals: THREE.Group[]; center: THREE.Vector3 }[] {
     return [...this.clusters.values()].map((c) => ({
@@ -314,6 +371,12 @@ export class CrystalField {
 
   update(dt: number): void {
     this.time += dt;
+    // ~1.3s to cross-fade the edges, roughly matching the sky's leg of a pass.
+    const step = dt / 1.3;
+    this.edgeFade =
+      this.edgeFade < this.edgeTarget
+        ? Math.min(this.edgeTarget, this.edgeFade + step)
+        : Math.max(this.edgeTarget, this.edgeFade - step);
     for (const cluster of this.clusters.values()) {
       for (const crystal of cluster.crystals) {
         crystal.root.rotation.y += crystal.spin * dt;
@@ -328,6 +391,14 @@ export class CrystalField {
 
         if (cluster.side === 'night') {
           for (const child of crystal.root.children) {
+            if (child.userData.rim || child.userData.edges) {
+              // Only lit under a night sky; also flares with the birth flourish.
+              child.visible = this.edgeFade > 0.002;
+              const mat = (child as THREE.Mesh).material as THREE.Material & { opacity: number };
+              mat.opacity = Math.min(1, child.userData.baseOpacity * (1 + flourish * 1.8)) * this.edgeFade;
+              if (child.userData.rim) child.scale.setScalar(1.14 + flourish * 0.25);
+              continue;
+            }
             const phase = child.userData.twinklePhase;
             if (phase !== undefined) {
               const s = 0.6 + 0.55 * Math.sin(this.time * 3.2 + phase);
