@@ -1,6 +1,7 @@
-// Crystal generators: clickable pedestals. Day generators are warm sandstone
-// with a glowing ring; night generators are dark stone with orbiting stars.
-// A floating sign above each shows exactly what one press produces.
+// Crystal generators: a single clickable crystal floating over a glowing ring —
+// no stone pedestal, so the crystal clusters on the ground stay visible behind
+// it. Day generators glow warm with a bright ring; night generators are cooler
+// with orbiting stars. A sign just below shows exactly what one press produces.
 
 import * as THREE from 'three';
 import type { CrystalColor, GeneratorDef, LevelDef, Side } from '../../../shared/types.ts';
@@ -13,15 +14,17 @@ import { easeInOut, easeOutBack, tween } from './anim.ts';
 const SCAFFOLD_GEO = new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(CRYSTAL_RADIUS, 0));
 const HULL_GEO = new THREE.IcosahedronGeometry(CRYSTAL_RADIUS, 0);
 
-// How far a pedestal drops below its resting spot when hidden underground —
-// enough to tuck the whole stand beneath the (opaque) terrain — and how long the
-// rise/sink glides take.
+// How far a stand drops below its resting spot when hidden underground — enough
+// to tuck the ring beneath the (opaque) terrain — and how long the rise/sink
+// glides take.
 const SINK_DEPTH = 4;
 const RISE_TIME = 0.85;
 const SINK_TIME = 0.7;
-/** Horizontal radius a player is pushed out to when bumping a pedestal (its
- * stone column/base; kept snug so players can still slip between neighbours). */
-export const PEDESTAL_COLLIDER_RADIUS = 1.4;
+/** Resting height of the floating crystal above the ring (it bobs around this). */
+const CROWN_Y = 2.4;
+/** Horizontal radius a player is pushed out to when bumping a generator's spot;
+ * kept snug so players can still slip between neighbours. */
+export const PEDESTAL_COLLIDER_RADIUS = 1.1;
 
 // Scratch vectors for the per-frame sky test, so it allocates nothing.
 const SKY_TMP = new THREE.Vector3();
@@ -36,7 +39,8 @@ export class GeneratorStand {
   private ring: THREE.Mesh;
   private sign!: THREE.Sprite;
   private signScale = new THREE.Vector3(1, 1, 1);
-  private outline = new THREE.Group();
+  /** White back-side shells around each crystal, shown while hovered. */
+  private outlineShells: THREE.Mesh[] = [];
   private time = Math.random() * 10;
   /** Resting height of the stand; it animates up to this out of the ground. */
   private readonly groundY: number;
@@ -49,9 +53,6 @@ export class GeneratorStand {
    * unclickable. Sunset levels keep every stand active. See `setActive`.
    */
   private active = true;
-  private stoneMat!: THREE.MeshStandardMaterial;
-  private stoneBase = new THREE.Color();
-  private stoneDim = new THREE.Color();
   private scaffoldMats: { mat: THREE.LineBasicMaterial; base: THREE.Color; dim: THREE.Color }[] = [];
 
   constructor(def: GeneratorDef, position: THREE.Vector3) {
@@ -60,42 +61,9 @@ export class GeneratorStand {
     this.groundY = position.y;
 
     const isDay = def.side === 'day';
-    const stoneMat = new THREE.MeshStandardMaterial({
-      color: isDay ? 0xe0c18e : 0x2e3560,
-      roughness: 0.8,
-      flatShading: true,
-    });
-    this.stoneMat = stoneMat;
-    this.stoneBase.copy(stoneMat.color);
-    this.stoneDim.copy(stoneMat.color).multiplyScalar(0.42);
 
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.9, 0.6, 8), stoneMat);
-    base.position.y = 0.3;
-    base.castShadow = true;
-    base.receiveShadow = true;
-    this.root.add(base);
-    const column = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 1.0, 1.6, 8), stoneMat);
-    column.position.y = 1.4;
-    column.castShadow = true;
-    this.root.add(column);
-    const top = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 0.85, 0.4, 8), stoneMat);
-    top.position.y = 2.3;
-    top.castShadow = true;
-    this.root.add(top);
-    this.clickTargets.push(base, column, top);
-
-    // White shell shown while the player hovers the generator.
-    const outlineMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.BackSide });
-    for (const mesh of [base, column, top]) {
-      const shell = new THREE.Mesh(mesh.geometry, outlineMat);
-      shell.position.copy(mesh.position);
-      shell.scale.setScalar(1.07);
-      this.outline.add(shell);
-    }
-    this.outline.visible = false;
-    this.root.add(this.outline);
-
-    // Glow ring at the base marking the side.
+    // Glow ring on the ground marking the side (the only thing left where the
+    // pedestal used to stand — it lies flat, so it never hides ground crystals).
     this.ring = new THREE.Mesh(
       new THREE.TorusGeometry(1.8, 0.08, 8, 32),
       new THREE.MeshBasicMaterial({ color: isDay ? 0xffc776 : 0x8ea6ff, transparent: true, opacity: 0.9 })
@@ -108,7 +76,8 @@ export class GeneratorStand {
     // red cages), hovering above the pedestal. Each is the wireframe of the
     // crystal that will be born inside it — same size, same orientation.
     this.crown = new THREE.Group();
-    this.crown.position.y = 3.2;
+    this.crown.position.y = CROWN_Y;
+    const outlineMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.BackSide });
     const crownColors = def.outputs.flatMap((out) => Array<typeof out.color>(out.count).fill(out.color));
     const n = crownColors.length;
     const spacing = n <= 4 ? 1.2 : 4.8 / (n - 1);
@@ -151,6 +120,12 @@ export class GeneratorStand {
         scaffoldMat.userData.skyColor = scaffoldMat.color.clone().offsetHSL(0, 0.12, -0.34);
         this.dayScaffolds.push(scaffold);
       }
+      // White back-side shell shown while the player hovers the crystal.
+      const shell = new THREE.Mesh(HULL_GEO, outlineMat);
+      shell.scale.setScalar(1.12);
+      shell.visible = false;
+      slot.add(shell);
+      this.outlineShells.push(shell);
       // Lines are hard to hit with a raycast, so click the invisible hull.
       const hull = new THREE.Mesh(
         HULL_GEO,
@@ -164,11 +139,10 @@ export class GeneratorStand {
     this.root.add(this.crown);
 
     // Sign showing the output, e.g. "+2 ◆  +1 ◆". Clicking it presses too.
-    // It hangs off the pedestal's front face rather than floating overhead:
-    // generators stand on the platform's front edge, so anything above them
-    // covers the crystal clusters behind when you look at the scene head-on.
+    // It sits just below the floating crystal, low enough to stay clear of the
+    // crystal clusters behind when you look at the scene head-on.
     const sign = makeSignSprite(def);
-    sign.position.set(0, 1.15, 2.1);
+    sign.position.set(0, 1.0, 0.5);
     this.root.add(sign);
     this.clickTargets.push(sign);
     this.sign = sign;
@@ -201,10 +175,9 @@ export class GeneratorStand {
   setActive(active: boolean): void {
     this.active = active;
     (this.ring.material as THREE.MeshBasicMaterial).opacity = active ? 0.9 : 0.1;
-    this.stoneMat.color.copy(active ? this.stoneBase : this.stoneDim);
     for (const s of this.scaffoldMats) s.mat.color.copy(active ? s.base : s.dim);
     (this.sign.material as THREE.SpriteMaterial).opacity = active ? 1 : 0.3;
-    if (!active) this.outline.visible = false;
+    if (!active) for (const shell of this.outlineShells) shell.visible = false;
   }
 
   /** Whether this generator is currently the active side (always true on Sunset). */
@@ -215,7 +188,7 @@ export class GeneratorStand {
   /** Toggle the white hover outline. */
   setHovered(on: boolean): void {
     if (!this.active) return;
-    this.outline.visible = on;
+    for (const shell of this.outlineShells) shell.visible = on;
   }
 
   /** Whether the pedestal has finished rising and can be pressed / collided with. */
@@ -334,7 +307,7 @@ export class GeneratorStand {
     // fight the deactivated colours set in `setActive`.
     if (this.active && camera) this.shadeCrownForSky(camera);
     this.crown.rotation.y += dt * 0.9;
-    this.crown.position.y = 3.2 + Math.sin(this.time * 1.8) * 0.15;
+    this.crown.position.y = CROWN_Y + Math.sin(this.time * 1.8) * 0.15;
     const ringMat = this.ring.material as THREE.MeshBasicMaterial;
     if (this.active) ringMat.opacity = 0.65 + Math.sin(this.time * 2.4) * 0.25;
     for (const child of this.root.children) {
