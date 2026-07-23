@@ -6,7 +6,7 @@ import { getLevel, LEVEL_COUNT } from '../../../shared/levels.ts';
 import { activeSide, currentCounts, generatorLabel, isCycle, undoIndexFor } from '../../../shared/logic.ts';
 import type { GameState, LevelDef, ServerMsg, Side } from '../../../shared/types.ts';
 import type { GameChannel } from '../net/client.ts';
-import { getSettings } from '../settings.ts';
+import { getSettings, pixelRatioFor } from '../settings.ts';
 import { Hud } from '../screens/hud.ts';
 import { dismissToast, el, showDialog, showToast, uiRoot } from '../screens/ui.ts';
 import { clearTweens, updateTweens } from './anim.ts';
@@ -50,6 +50,12 @@ export class GameController {
   private lastPresses: Record<string, number> = {};
   private busy = false; // balance animation in flight
   private disposed = false;
+  /** Whether the loop should keep running (false while blurred / tab hidden). */
+  private running = false;
+  /** Whether a frame is already queued; guards against double-scheduling. */
+  private scheduled = false;
+  /** performance.now() of the last rendered frame, for the FPS cap. */
+  private lastRender = 0;
   private raycaster = new THREE.Raycaster();
   private pointer = new THREE.Vector2();
   private pointerActive = false;
@@ -71,7 +77,7 @@ export class GameController {
   ) {
     const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: getSettings().quality === 'high' });
-    this.renderer.setPixelRatio(getSettings().quality === 'high' ? Math.min(window.devicePixelRatio, 2) : 1);
+    this.renderer.setPixelRatio(pixelRatioFor(getSettings()));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled = getSettings().quality === 'high';
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -129,6 +135,11 @@ export class GameController {
     channel.onMessage = (msg) => this.onMessage(msg);
 
     window.addEventListener('resize', this.onResize);
+    // Fully pause rendering when the window loses focus or the tab is hidden —
+    // no reason to heat up the GPU on a scene nobody is looking at.
+    window.addEventListener('blur', this.pause);
+    window.addEventListener('focus', this.resume);
+    document.addEventListener('visibilitychange', this.onVisibilityChange);
     canvas.addEventListener('click', this.onClick);
     canvas.addEventListener('mousemove', this.onMouseMove);
     canvas.addEventListener('mouseleave', this.onMouseLeave);
@@ -145,8 +156,7 @@ export class GameController {
 
     this.tutorial.onGameStart();
     this.loadLevel(startLevel, { presses: {}, history: [], phase: 0 });
-    this.lastTime = performance.now();
-    requestAnimationFrame(this.frame);
+    this.resume();
   }
 
   // ---------- Pack intro cutscene ----------
@@ -631,8 +641,25 @@ export class GameController {
 
   // ---------- Loop & teardown ----------
 
+  /** Queue the next frame, unless one is already queued or the loop is stopped. */
+  private ensureScheduled(): void {
+    if (this.scheduled || !this.running || this.disposed) return;
+    this.scheduled = true;
+    requestAnimationFrame(this.frame);
+  }
+
   private frame = (now: number): void => {
-    if (this.disposed) return;
+    this.scheduled = false;
+    if (this.disposed || !this.running) return;
+    this.ensureScheduled();
+
+    // Frame-rate cap: skip the update + render entirely when we're ahead of the
+    // ceiling. rAF keeps firing (cheap), but we do no work — and skipping
+    // render() also skips the shadow-map pass, so this cuts both CPU and GPU.
+    const cap = getSettings().fpsCap;
+    if (cap > 0 && now - this.lastRender < 1000 / cap - 1) return;
+    this.lastRender = now;
+
     const dt = Math.min(0.05, (now - this.lastTime) / 1000);
     this.lastTime = now;
     this.player.update(dt);
@@ -646,8 +673,31 @@ export class GameController {
     this.walkthrough.update();
     updateTweens(dt);
     this.renderer.render(this.world.scene, this.camera);
-    requestAnimationFrame(this.frame);
   };
+
+  /** Stop the render loop (window blurred / tab hidden / disposed). */
+  private pause = (): void => {
+    this.running = false;
+  };
+
+  /** (Re)start the render loop, resetting the clock so dt doesn't jump. */
+  private resume = (): void => {
+    if (this.disposed || this.running) return;
+    this.running = true;
+    this.lastTime = performance.now();
+    this.ensureScheduled();
+  };
+
+  private onVisibilityChange = (): void => {
+    if (document.hidden) this.pause();
+    else this.resume();
+  };
+
+  /** Re-read the pixel ratio from settings (called live when the slider moves). */
+  applyResolutionScale(): void {
+    this.renderer.setPixelRatio(pixelRatioFor(getSettings()));
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+  }
 
   private onResize = (): void => {
     this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -664,10 +714,14 @@ export class GameController {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.running = false;
     this.intro?.dispose();
     this.intro = null;
     if (this.poseTimer !== undefined) window.clearInterval(this.poseTimer);
     window.removeEventListener('resize', this.onResize);
+    window.removeEventListener('blur', this.pause);
+    window.removeEventListener('focus', this.resume);
+    document.removeEventListener('visibilitychange', this.onVisibilityChange);
     this.renderer.domElement.removeEventListener('click', this.onClick);
     this.renderer.domElement.removeEventListener('mousemove', this.onMouseMove);
     this.renderer.domElement.removeEventListener('mouseleave', this.onMouseLeave);

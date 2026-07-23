@@ -6,7 +6,7 @@
 
 import * as THREE from 'three';
 import { STARTER_PACK_NAME } from '../../../shared/levels.ts';
-import { getSettings } from '../settings.ts';
+import { getSettings, pixelRatioFor } from '../settings.ts';
 import { el, uiRoot } from '../screens/ui.ts';
 import { IntroSequence } from './intro.ts';
 import { Player } from './player.ts';
@@ -20,7 +20,7 @@ export function runCutscene(packName = STARTER_PACK_NAME): void {
   const highQuality = getSettings().quality === 'high';
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: highQuality });
-  renderer.setPixelRatio(highQuality ? Math.min(window.devicePixelRatio, 2) : 1);
+  renderer.setPixelRatio(pixelRatioFor(getSettings()));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
 
@@ -59,15 +59,46 @@ export function runCutscene(packName = STARTER_PACK_NAME): void {
 
   startIntro();
 
+  let running = false;
+  let scheduled = false;
+  let lastRender = 0;
+
   const frame = (now: number): void => {
+    scheduled = false;
+    if (!running) return;
+    ensureScheduled();
+
+    const cap = getSettings().fpsCap;
+    if (cap > 0 && now - lastRender < 1000 / cap - 1) return;
+    lastRender = now;
+
     const dt = Math.min(0.05, (now - lastTime) / 1000);
     lastTime = now;
     if (intro) intro.update();
     else if (now >= replayAt) startIntro();
     renderer.render(world.scene, camera);
-    requestAnimationFrame(frame);
   };
-  requestAnimationFrame(frame);
+
+  function ensureScheduled(): void {
+    if (scheduled || !running) return;
+    scheduled = true;
+    requestAnimationFrame(frame);
+  }
+
+  const resume = (): void => {
+    if (running) return;
+    running = true;
+    lastTime = performance.now();
+    ensureScheduled();
+  };
+  const pause = (): void => {
+    running = false;
+  };
+
+  window.addEventListener('blur', pause);
+  window.addEventListener('focus', resume);
+  document.addEventListener('visibilitychange', () => (document.hidden ? pause() : resume()));
+  resume();
 
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
