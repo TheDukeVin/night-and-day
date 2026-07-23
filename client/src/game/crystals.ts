@@ -68,7 +68,10 @@ export function makeCrystalMesh(color: CrystalColor, side: Side): THREE.Group {
     opacity: side === 'day' ? 0.82 : 0.9,
     roughness: 0.15,
     metalness: 0.1,
-    transmission: 0.25,
+    // No `transmission`: any transmissive material in the scene makes three
+    // re-render the whole opaque scene into a mipmapped MSAA target every frame.
+    // At 0.25 it was barely visible next to the opacity + emissive glow, so the
+    // translucency is carried by those instead.
     emissive: hex,
     emissiveIntensity: side === 'day' ? 0.55 : 0.12,
     flatShading: true,
