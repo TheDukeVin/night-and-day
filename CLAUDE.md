@@ -21,6 +21,17 @@ npm run typecheck      # tsc --noEmit over shared/, server/, client/src
 npm run verify-levels  # asserts every level's stored solution balances (run after ANY level edit)
 ```
 
+Puzzle design helper (2-color balance): `tools/puzzle_explorer.py` BFS-plots the
+minimum presses to reach each `(r, b)` crystal-diff state for a generator set.
+Pass generators as `dr,db` deltas — use the `--gen=...` form so negatives aren't
+read as flags:
+
+```bash
+python tools/puzzle_explorer.py                                  # built-in day/night set
+python tools/puzzle_explorer.py -g 1,2 -g 2,2 --gen=-3,0 --gen=-2,-1
+python tools/puzzle_explorer.py -g 1,2 --gen=-3,0 --bound 20 --save grid.png
+```
+
 Dev flow: open http://localhost:5173. In dev, Vite proxies `/ws` to :8787; in
 production the WebSocket is same-origin on :8787. Stop stray servers with
 `lsof -ti:5173,8787 -sTCP:LISTEN | xargs kill` (npm doesn't forward SIGTERM).
