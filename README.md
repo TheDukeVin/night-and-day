@@ -7,8 +7,13 @@ linear Diophantine equations, dressed up as a sunset stroll.
 - **Single player**: play as **Dusk**, who can use every generator.
 - **Two players**: one player is **Day** (golden generators only), the other is
   **Night** (starry generators only) — you must collaborate to balance the level.
-- **Starter pack**: 50 levels ramping gently from simple counting through
-  multiplication, differences, and remainder puzzles to multi-color systems.
+- **Starter pack**: 40 levels ramping gently from simple counting through
+  multiplication, differences, and remainder puzzles to two-color systems.
+- **Two puzzle styles**: **Sunset** levels let both sides act freely and press
+  Balance any time. **Cycle** levels take turns — only the active side may act,
+  then presses **"Pass to Day/Night"** to hand off before the last side balances.
+  The world shifts with the turn: a starry night with fireflies, or a bright day
+  with a sun that arcs so shadows sweep across the ground.
 - Stuck? **Reset** offers a hint (how many times to press one generator); after a
   hint plus 5 more resets the game offers the full answer.
 
@@ -36,7 +41,7 @@ npm run typecheck       # tsc over client, server and shared code
 
 ## Layout
 
-- `shared/` — types, pure game logic, the 20 starter levels (+ verifier), and the
+- `shared/` — types, pure game logic, the 40 starter levels (+ verifier), and the
   authoritative `GameSession` used by both the server and single-player loopback.
 - `server/` — Node HTTP + WebSocket server: serves the built client and hosts
   two-player rooms (server-authoritative, role-checked).
