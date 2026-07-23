@@ -189,7 +189,7 @@ export const STARTER_LEVELS: LevelDef[] = [
     index: 16,
     name: 'Night Sets Up',
     concept: 'Taking turns',
-    initial: { red: { day: 2, night: 2 }, blue: { day: 2, night: 0 } },
+    initial: { red: { day: 0, night: 2 }, blue: { day: 0, night: 0 } },
     generators: [
       gen('d1', 'day', [
         ['red', 1],
@@ -197,7 +197,7 @@ export const STARTER_LEVELS: LevelDef[] = [
       ]),
       gen('n1', 'night', [['blue', 1]]),
     ],
-    solution: { n1: 2, d1: 0 },
+    solution: { n1: 2, d1: 2 },
     cycle: ['night', 'day'],
   },
   {
@@ -347,7 +347,7 @@ export const STARTER_LEVELS: LevelDef[] = [
     index: 27,
     name: 'Two Night Helpers',
     concept: 'Planning presses',
-    initial: { red: { day: 6, night: 0 }, blue: { day: 1, night: 1 } },
+    initial: { red: { day: 6, night: 0 }, blue: { day: 0, night: 1 } },
     generators: [
       gen('d1', 'day', [['blue', 3]]),
       gen('n1', 'night', [['red', 2]]),
@@ -356,7 +356,7 @@ export const STARTER_LEVELS: LevelDef[] = [
         ['blue', 1],
       ]),
     ],
-    solution: { d1: 1, n1: 0, n2: 3 },
+    solution: { d1: 1, n1: 1, n2: 2 },
   },
   {
     index: 28,
