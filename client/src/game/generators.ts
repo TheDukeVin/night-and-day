@@ -5,7 +5,14 @@
 
 import * as THREE from 'three';
 import type { CrystalColor, GeneratorDef, LevelDef, Side } from '../../../shared/types.ts';
-import { collectColors, COLOR_HEX, CRYSTAL_RADIUS, DAY_PLATFORM_X, NIGHT_PLATFORM_X } from './crystals.ts';
+import {
+  collectColors,
+  COLOR_HEX,
+  CRYSTAL_RADIUS,
+  DAY_PLATFORM_X,
+  NIGHT_PLATFORM_X,
+  STAR_GEO,
+} from './crystals.ts';
 import type { SpawnPoint } from './crystals.ts';
 import { easeInOut, easeOutBack, tween } from './anim.ts';
 
@@ -30,6 +37,25 @@ export const PEDESTAL_COLLIDER_RADIUS = 1.1;
 const SKY_TMP = new THREE.Vector3();
 const SKY_TMP2 = new THREE.Vector3();
 
+/** Star specks orbiting a night generator. */
+const ORBIT_STARS = 6;
+/** These read slightly larger than the crystals' specks; STAR_GEO is 0.045. */
+const ORBIT_STAR_SCALE = 0.06 / 0.045;
+/** Their own tint — a touch cooler than the specks inside a crystal. */
+const ORBIT_STAR_MAT = new THREE.MeshBasicMaterial({ color: 0xdfe8ff });
+// Scratch objects for the per-frame orbit matrices.
+const ORBIT_MATRIX = new THREE.Matrix4();
+const ORBIT_POS = new THREE.Vector3();
+const ORBIT_SCALE = new THREE.Vector3().setScalar(ORBIT_STAR_SCALE);
+const ORBIT_QUAT = new THREE.Quaternion();
+
+interface OrbitSpec {
+  angle: number;
+  radius: number;
+  speed: number;
+  y: number;
+}
+
 export class GeneratorStand {
   readonly root = new THREE.Group();
   readonly def: GeneratorDef;
@@ -48,6 +74,9 @@ export class GeneratorStand {
   private solid = false;
   /** Day-side cage edges, re-tinted each frame by how bright the sky behind is. */
   private dayScaffolds: THREE.LineSegments[] = [];
+  /** Night stands only: the orbiting specks and the single mesh that draws them. */
+  private orbits: OrbitSpec[] = [];
+  private orbitMesh: THREE.InstancedMesh | null = null;
   /**
    * Cycle levels dim generators on the resting (non-active) side and make them
    * unclickable. Sunset levels keep every stand active. See `setActive`.
@@ -149,13 +178,19 @@ export class GeneratorStand {
     this.signScale.copy(sign.scale);
 
     if (!isDay) {
-      // Orbiting star specks for night generators.
-      const starMat = new THREE.MeshBasicMaterial({ color: 0xdfe8ff });
-      for (let i = 0; i < 6; i++) {
-        const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.06), starMat);
-        star.userData.orbit = { angle: (i / 6) * Math.PI * 2, radius: 1.35, speed: 0.8 + Math.random() * 0.4, y: 1.4 + Math.random() * 1.2 };
-        this.root.add(star);
-      }
+      // Orbiting star specks for night generators, drawn in one call from the
+      // same shared octahedron the crystals' specks use.
+      this.orbits = Array.from({ length: ORBIT_STARS }, (_, i) => ({
+        angle: (i / ORBIT_STARS) * Math.PI * 2,
+        radius: 1.35,
+        speed: 0.8 + Math.random() * 0.4,
+        y: 1.4 + Math.random() * 1.2,
+      }));
+      this.orbitMesh = new THREE.InstancedMesh(STAR_GEO, ORBIT_STAR_MAT, ORBIT_STARS);
+      // Bounding sphere comes from the base geometry at the origin, so leaving
+      // culling on would drop the whole mesh once the stand is off-centre.
+      this.orbitMesh.frustumCulled = false;
+      this.root.add(this.orbitMesh);
     }
 
     for (const target of this.clickTargets) target.userData.generatorId = def.id;
@@ -310,12 +345,18 @@ export class GeneratorStand {
     this.crown.position.y = CROWN_Y + Math.sin(this.time * 1.8) * 0.15;
     const ringMat = this.ring.material as THREE.MeshBasicMaterial;
     if (this.active) ringMat.opacity = 0.65 + Math.sin(this.time * 2.4) * 0.25;
-    for (const child of this.root.children) {
-      const orbit = child.userData.orbit;
-      if (orbit) {
+    if (this.orbitMesh) {
+      this.orbits.forEach((orbit, i) => {
         orbit.angle += dt * orbit.speed;
-        child.position.set(Math.cos(orbit.angle) * orbit.radius, orbit.y + Math.sin(orbit.angle * 2) * 0.15, Math.sin(orbit.angle) * orbit.radius);
-      }
+        ORBIT_POS.set(
+          Math.cos(orbit.angle) * orbit.radius,
+          orbit.y + Math.sin(orbit.angle * 2) * 0.15,
+          Math.sin(orbit.angle) * orbit.radius
+        );
+        ORBIT_MATRIX.compose(ORBIT_POS, ORBIT_QUAT.identity(), ORBIT_SCALE);
+        this.orbitMesh!.setMatrixAt(i, ORBIT_MATRIX);
+      });
+      this.orbitMesh.instanceMatrix.needsUpdate = true;
     }
   }
 }
