@@ -48,5 +48,40 @@ export function buildSettingsPanel(): HTMLElement {
   tut.addEventListener('change', () => saveSettings({ showTutorials: tut.checked }));
   panel.append(el('div', { className: 'settings-row' }, [el('span', { text: 'Show tutorial tips' }), tut]));
 
+  // --- Performance ---
+  // Lower these to run the game cooler on a laptop whose fan gets loud.
+  const res = el('input') as HTMLInputElement;
+  res.type = 'range';
+  res.min = '0.5';
+  res.max = '1';
+  res.step = '0.1';
+  res.value = String(settings.resolutionScale);
+  res.addEventListener('input', () => {
+    saveSettings({ resolutionScale: Number(res.value) });
+    // Apply live if a level is running; otherwise it takes effect next level.
+    (window as unknown as { __nd?: { applyResolutionScale?: () => void } }).__nd?.applyResolutionScale?.();
+  });
+  panel.append(el('div', { className: 'settings-row' }, [el('span', { text: 'Resolution' }), res]));
+
+  const fps = el('select') as HTMLSelectElement;
+  for (const [label, value] of [
+    ['30 fps', '30'],
+    ['60 fps', '60'],
+    ['Unlimited', '0'],
+  ] as const) {
+    const opt = el('option', { text: label }) as HTMLOptionElement;
+    opt.value = value;
+    if (Number(value) === settings.fpsCap) opt.selected = true;
+    fps.append(opt);
+  }
+  fps.addEventListener('change', () => saveSettings({ fpsCap: Number(fps.value) }));
+  panel.append(el('div', { className: 'settings-row' }, [el('span', { text: 'Max frame rate' }), fps]));
+  panel.append(
+    el('div', {
+      className: 'settings-hint',
+      text: 'Lower the resolution or frame rate if the game feels hot or the fan is loud.',
+    })
+  );
+
   return panel;
 }
