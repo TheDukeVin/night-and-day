@@ -23,6 +23,14 @@ const CRYSTAL_GEO = new THREE.IcosahedronGeometry(CRYSTAL_RADIUS, 0);
 /** Facet outlines, used to rim night crystals so they read against the dark sky. */
 const CRYSTAL_EDGES_GEO = new THREE.EdgesGeometry(CRYSTAL_GEO);
 
+/**
+ * The twinkling specks inside a night crystal (and orbiting a night generator).
+ * Shared module-wide: `CrystalField` draws every crystal's specks as a single
+ * `InstancedMesh`, so these must not be per-crystal allocations.
+ */
+export const STAR_GEO = new THREE.OctahedronGeometry(0.045);
+export const STAR_MAT = new THREE.MeshBasicMaterial({ color: 0xeef2ff });
+
 /** A pale, high-key version of a color — bright enough to glow at night. */
 function edgeColor(color: CrystalColor): THREE.Color {
   return new THREE.Color(COLOR_HEX[color].day).lerp(new THREE.Color(0xffffff), 0.5);
@@ -39,6 +47,41 @@ export interface SpawnPoint {
 /** How long a newly generated crystal shows its "just made" flourish. */
 const BURST_TIME = 1.6;
 
+/** Twinkling specks held inside each night crystal. */
+const STARS_PER_CRYSTAL = 4;
+/** Room for 64 night crystals' worth of specks before the buffer has to grow. */
+const STAR_CAPACITY_START = 256;
+
+// Scratch objects for the per-frame star matrix maths — see `SKY_TMP` in
+// generators.ts. Never allocate per star per frame.
+const STAR_MATRIX = new THREE.Matrix4();
+const STAR_LOCAL = new THREE.Matrix4();
+const STAR_POS = new THREE.Vector3();
+const STAR_SCALE = new THREE.Vector3();
+const STAR_QUAT = new THREE.Quaternion();
+
+/**
+ * One twinkling speck inside a night crystal. Held as plain data rather than as
+ * a child mesh: the specks are drawn from `CrystalField`'s shared
+ * `InstancedMesh`, so each frame we compose a matrix from these numbers instead
+ * of moving an Object3D.
+ */
+interface StarSpec {
+  twinklePhase: number;
+  /** Whirl-out parameters, used only during the birth flourish. */
+  swirl: { angle: number; radius: number; y: number; speed: number };
+}
+
+/** The random speck layout shared by inline and instanced stars, so both look alike. */
+function makeStarSpec(): StarSpec {
+  const angle = Math.random() * Math.PI * 2;
+  const radius = 0.28 + Math.random() * 0.2;
+  return {
+    twinklePhase: Math.random() * Math.PI * 2,
+    swirl: { angle, radius, y: (Math.random() - 0.5) * 0.5, speed: 3.5 + Math.random() * 2.5 },
+  };
+}
+
 interface CrystalMesh {
   root: THREE.Group;
   spin: number;
@@ -46,6 +89,8 @@ interface CrystalMesh {
   slot: THREE.Vector3;
   /** Seconds of birth flourish left: day crystals glow, night ones swirl stars. */
   burst: number;
+  /** Night crystals only — drawn via the field's instanced star mesh. */
+  stars: StarSpec[];
 }
 
 interface Cluster {
@@ -59,7 +104,18 @@ interface Cluster {
   lastText: string;
 }
 
-export function makeCrystalMesh(color: CrystalColor, side: Side): THREE.Group {
+/**
+ * Build one crystal. `inlineStars` adds a night crystal's specks as child meshes,
+ * which is what the intro cutscene wants — it has a handful of crystals and never
+ * animates the specks itself. `CrystalField` passes `false` and draws them from a
+ * single instanced mesh instead, since a full platform of crystals would
+ * otherwise cost four draw calls apiece.
+ */
+export function makeCrystalMesh(
+  color: CrystalColor,
+  side: Side,
+  { inlineStars = true }: { inlineStars?: boolean } = {}
+): THREE.Group {
   const group = new THREE.Group();
   const hex = COLOR_HEX[color][side];
   const mat = new THREE.MeshPhysicalMaterial({
@@ -68,7 +124,10 @@ export function makeCrystalMesh(color: CrystalColor, side: Side): THREE.Group {
     opacity: side === 'day' ? 0.82 : 0.9,
     roughness: 0.15,
     metalness: 0.1,
-    transmission: 0.25,
+    // No `transmission`: any transmissive material in the scene makes three
+    // re-render the whole opaque scene into a mipmapped MSAA target every frame.
+    // At 0.25 it was barely visible next to the opacity + emissive glow, so the
+    // translucency is carried by those instead.
     emissive: hex,
     emissiveIntensity: side === 'day' ? 0.55 : 0.12,
     flatShading: true,
@@ -132,16 +191,13 @@ export function makeCrystalMesh(color: CrystalColor, side: Side): THREE.Group {
     group.add(rim);
 
     // Tiny star specks that twinkle, as if the crystal holds a night sky.
-    const starMat = new THREE.MeshBasicMaterial({ color: 0xeef2ff });
-    for (let i = 0; i < 4; i++) {
-      const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.045), starMat);
-      const a = Math.random() * Math.PI * 2;
-      const r = 0.28 + Math.random() * 0.2;
-      star.position.set(Math.cos(a) * r, (Math.random() - 0.5) * 0.5, Math.sin(a) * r);
-      star.userData.twinklePhase = Math.random() * Math.PI * 2;
-      // Swirl parameters, used only during the birth flourish.
-      star.userData.swirl = { angle: a, radius: r, y: star.position.y, speed: 3.5 + Math.random() * 2.5 };
-      group.add(star);
+    if (inlineStars) {
+      for (let i = 0; i < STARS_PER_CRYSTAL; i++) {
+        const { swirl } = makeStarSpec();
+        const star = new THREE.Mesh(STAR_GEO, STAR_MAT);
+        star.position.set(Math.cos(swirl.angle) * swirl.radius, swirl.y, Math.sin(swirl.angle) * swirl.radius);
+        group.add(star);
+      }
     }
   }
   return group;
@@ -173,6 +229,8 @@ export class CrystalField {
   /** 0 = no night-crystal edge highlight, 1 = full. Eased toward `edgeTarget`. */
   private edgeFade = 0;
   private edgeTarget = 0;
+  /** Every night crystal's specks, drawn in one call. Grows if a level needs it. */
+  private starMesh!: THREE.InstancedMesh;
 
   constructor(
     private level: LevelDef,
@@ -181,10 +239,34 @@ export class CrystalField {
     this.colors = collectColors(level);
     this.buildPlatform('day');
     this.buildPlatform('night');
+    this.growStars(STAR_CAPACITY_START);
     for (const color of this.colors) {
       this.makeCluster(color, 'day');
       this.makeCluster(color, 'night');
     }
+  }
+
+  /**
+   * (Re)allocate the instanced speck mesh to hold at least `needed` stars.
+   * Crystal counts are unbounded — `currentCounts` just multiplies presses and
+   * nothing caps them — so a player who keeps pressing can outgrow any fixed
+   * buffer. Doubling keeps reallocation rare.
+   */
+  private growStars(needed: number): void {
+    if (this.starMesh && needed <= this.starMesh.instanceMatrix.count) return;
+    const capacity = this.starMesh
+      ? Math.max(needed, this.starMesh.instanceMatrix.count * 2)
+      : Math.max(needed, STAR_CAPACITY_START);
+    if (this.starMesh) {
+      this.group.remove(this.starMesh);
+      this.starMesh.dispose(); // instance buffers only; STAR_GEO/STAR_MAT are shared
+    }
+    this.starMesh = new THREE.InstancedMesh(STAR_GEO, STAR_MAT, capacity);
+    // An InstancedMesh's bounding sphere comes from the base geometry (a 0.045
+    // octahedron at the origin), so leaving culling on would drop the whole mesh.
+    this.starMesh.frustumCulled = false;
+    this.starMesh.count = 0;
+    this.group.add(this.starMesh);
   }
 
   private platformY(side: Side): number {
@@ -299,7 +381,7 @@ export class CrystalField {
       while (cluster.crystals.length < target) {
         const index = cluster.crystals.length;
         const slot = this.slotFor(cluster, index);
-        const root = makeCrystalMesh(cluster.color, cluster.side);
+        const root = makeCrystalMesh(cluster.color, cluster.side, { inlineStars: false });
         const from = queue[spawned];
         const crystal: CrystalMesh = {
           root,
@@ -307,6 +389,10 @@ export class CrystalField {
           bobPhase: Math.random() * Math.PI * 2,
           slot,
           burst: from ? BURST_TIME : 0,
+          stars:
+            cluster.side === 'night'
+              ? Array.from({ length: STARS_PER_CRYSTAL }, makeStarSpec)
+              : [],
         };
         cluster.crystals.push(crystal);
         this.group.add(root);
@@ -336,6 +422,12 @@ export class CrystalField {
       }
       this.drawLabel(cluster, target);
     }
+
+    let stars = 0;
+    for (const cluster of this.clusters.values()) {
+      for (const crystal of cluster.crystals) stars += crystal.stars.length;
+    }
+    this.growStars(stars);
   }
 
   /**
@@ -377,6 +469,7 @@ export class CrystalField {
       this.edgeFade < this.edgeTarget
         ? Math.min(this.edgeTarget, this.edgeFade + step)
         : Math.max(this.edgeTarget, this.edgeFade - step);
+    let starCount = 0;
     for (const cluster of this.clusters.values()) {
       for (const crystal of cluster.crystals) {
         crystal.root.rotation.y += crystal.spin * dt;
@@ -397,27 +490,12 @@ export class CrystalField {
               const mat = (child as THREE.Mesh).material as THREE.Material & { opacity: number };
               mat.opacity = Math.min(1, child.userData.baseOpacity * (1 + flourish * 1.8)) * this.edgeFade;
               if (child.userData.rim) child.scale.setScalar(1.14 + flourish * 0.25);
-              continue;
-            }
-            const phase = child.userData.twinklePhase;
-            if (phase !== undefined) {
-              const s = 0.6 + 0.55 * Math.sin(this.time * 3.2 + phase);
-              child.scale.setScalar(Math.max(0.15, s) * (1 + flourish * 1.4));
-            }
-            const swirl = child.userData.swirl;
-            // At flourish 0 this evaluates to the star's resting spot, so the
-            // swirl eases back home instead of snapping.
-            if (swirl) {
-              // Stars whirl out and around the new crystal, then settle back.
-              const angle = swirl.angle + this.time * swirl.speed * flourish;
-              const r = swirl.radius * (1 + flourish * 1.1);
-              child.position.set(
-                Math.cos(angle) * r,
-                swirl.y + Math.sin(angle * 2) * 0.3 * flourish,
-                Math.sin(angle) * r
-              );
             }
           }
+          // The specks live in the shared instanced mesh rather than under the
+          // crystal, so their transforms are composed from the crystal's own
+          // matrix below (see `updateStars`).
+          starCount = this.updateStars(crystal, flourish, starCount);
         } else {
           for (const child of crystal.root.children) {
             const mat = (child as THREE.Mesh).material as THREE.MeshPhysicalMaterial | undefined;
@@ -433,6 +511,42 @@ export class CrystalField {
         }
       }
     }
+    this.starMesh.count = starCount;
+    this.starMesh.instanceMatrix.needsUpdate = true;
+  }
+
+  /**
+   * Write one night crystal's specks into the instanced mesh, starting at
+   * `offset`, and return the next free slot. The twinkle and swirl formulas are
+   * the ones the child meshes used to run; only the destination changed.
+   */
+  private updateStars(crystal: CrystalMesh, flourish: number, offset: number): number {
+    if (crystal.stars.length === 0) return offset;
+    // The specks are no longer children of the crystal, so a hidden crystal no
+    // longer hides them for free — skipping the slots leaves them undrawn.
+    // `playBalanceAnimation` relies on this when a pair annihilates.
+    if (!crystal.root.visible) return offset;
+    // Refresh the crystal's own matrix from its animated position/rotation/scale
+    // — the spawn flight and the pop-in scale both drive those directly.
+    crystal.root.updateMatrix();
+    let i = offset;
+    for (const star of crystal.stars) {
+      const s = 0.6 + 0.55 * Math.sin(this.time * 3.2 + star.twinklePhase);
+      STAR_SCALE.setScalar(Math.max(0.15, s) * (1 + flourish * 1.4));
+      // At flourish 0 this evaluates to the star's resting spot, so the swirl
+      // eases back home instead of snapping.
+      const angle = star.swirl.angle + this.time * star.swirl.speed * flourish;
+      const r = star.swirl.radius * (1 + flourish * 1.1);
+      STAR_POS.set(
+        Math.cos(angle) * r,
+        star.swirl.y + Math.sin(angle * 2) * 0.3 * flourish,
+        Math.sin(angle) * r
+      );
+      STAR_LOCAL.compose(STAR_POS, STAR_QUAT.identity(), STAR_SCALE);
+      STAR_MATRIX.multiplyMatrices(crystal.root.matrix, STAR_LOCAL);
+      this.starMesh.setMatrixAt(i++, STAR_MATRIX);
+    }
+    return i;
   }
 }
 
