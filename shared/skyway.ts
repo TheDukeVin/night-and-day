@@ -158,4 +158,65 @@ export const SKYWAY_LEVELS: LevelDef[] = [
       ],
     },
   },
+  {
+    index: 7,
+    name: 'Level 7',
+    concept: 'Jumping and pushing',
+    initial: { red: { day: 2, night: 1 } },
+    generators: [
+      gen('d2', 'day', [['red', 2]], { x: -3.5, y: 6, z: 15.5 }),
+      gen('d3', 'night', [['red', 2]], { x: -3, y: 6, z: -12 }),
+      gen('d1', 'night', [['red', 4]], { x: -21, y: 0, z: -11 }),
+      gen('d4', 'day', [['red', 1]], { x: 7, y: 8, z: 14 }),
+    ],
+    // Day is even until d4 is pressed and night is always odd, so d4 has to be
+    // reached — which is what makes the two towers depend on each other.
+    solution: { d1: 1, d2: 2, d3: 1, d4: 1 },
+    terrain: {
+      spawn: { x: 0, z: 28 },
+      platforms: [
+        { id: 'p1', x: -16.5, z: 12.5, w: 3, d: 5, y: 2 },
+        { id: 'p2', x: 6.5, z: 12.5, w: 3, d: 5, y: 8 },
+        { id: 'p3', x: -16.5, z: -12.5, w: 3, d: 5, y: 2 },
+        { id: 'p4', x: -2.5, z: -12.5, w: 5, d: 5, y: 6 },
+      ],
+      boxes: [],
+      extenders: [
+        {
+          id: 'e1',
+          x: -13.5,
+          z: 12.5,
+          w: 3,
+          d: 5,
+          y: 4,
+          dir: '+x',
+          length: 6,
+          when: { color: 'red', side: 'night', count: 5 },
+        },
+        // d2 stands on this slab: the arm reaches out, the slab never moves.
+        {
+          id: 'e2',
+          x: -3.5,
+          z: 13.5,
+          w: 3,
+          d: 7,
+          y: 6,
+          dir: '+x',
+          length: 6,
+          when: { color: 'red', side: 'night', count: 7 },
+        },
+        {
+          id: 'e3',
+          x: -13.5,
+          z: -12.5,
+          w: 3,
+          d: 5,
+          y: 4,
+          dir: '+x',
+          length: 6,
+          when: { color: 'red', side: 'day', count: 4 },
+        },
+      ],
+    },
+  },
 ];

@@ -3,7 +3,7 @@
 
 import { currentCounts, isBalanced } from './logic.ts';
 import { BOX_SIZE } from './skyway.ts';
-import type { ExtendDirection, LevelDef, PlatformDef } from './types.ts';
+import type { ExtendDirection, ExtendingPlatformDef, LevelDef, PlatformDef } from './types.ts';
 
 const EXTEND_DIRECTIONS: ExtendDirection[] = ['+x', '-x', '+z', '-z', '+y', '-y'];
 
@@ -25,31 +25,64 @@ export function platformsUnder(level: LevelDef, x: number, z: number): PlatformD
 }
 
 /**
+ * The extending platforms whose slab covers (x, z) and can be stood on for good:
+ * everything except a `+y` one, whose top face is exactly where its pillar grows
+ * out of — anything authored there would be swallowed by the arm. The rest never
+ * move at all (only the arm does), so their tops are as solid as stone.
+ */
+export function standableExtendersUnder(level: LevelDef, x: number, z: number): ExtendingPlatformDef[] {
+  return (level.terrain?.extenders ?? []).filter(
+    (e) =>
+      e.dir !== '+y' &&
+      Math.abs(x - e.x) <= e.w / 2 + 1e-6 &&
+      Math.abs(z - e.z) <= e.d / 2 + 1e-6
+  );
+}
+
+/**
  * The surface something dropped at (x, z) would come to rest on: the highest
- * platform or crate top covering that spot, or the ground (0). This is what the
- * editor uses to place a crate or generator on whatever is beneath the cursor.
- *
- * Extending platforms are deliberately not surfaces here: they come and go with
- * the crystal counts, so anything authored to rest on one would be left floating
- * the moment it retracts. Only players (and crates they shove) ride them.
+ * platform, crate or standable extender top covering that spot, or the ground
+ * (0). This is what the editor uses to place a crate or generator on whatever is
+ * beneath the cursor.
  */
 export function surfaceUnder(level: LevelDef, x: number, z: number, ignoreId?: string): number {
-  let best = 0;
+  const options = surfacesUnder(level, x, z, ignoreId);
+  return options[options.length - 1]!;
+}
+
+/**
+ * Every height something could legally rest on at (x, z), lowest first: the
+ * ground, then each platform, crate and standable-extender top covering the spot.
+ * `surfaceUnder` is just the highest of these — the editor offers the whole list
+ * so a generator can be authored *under* an overhang instead of always on top.
+ */
+export function surfacesUnder(level: LevelDef, x: number, z: number, ignoreId?: string): number[] {
+  const tops = [0];
   for (const p of platformsUnder(level, x, z)) {
-    if (p.id !== ignoreId && p.y > best) best = p.y;
+    if (p.id !== ignoreId) tops.push(p.y);
   }
   for (const b of level.terrain?.boxes ?? []) {
     if (b.id === ignoreId) continue;
     if (Math.abs(x - b.x) > BOX_SIZE / 2 + 1e-6 || Math.abs(z - b.z) > BOX_SIZE / 2 + 1e-6) continue;
-    if (b.y + BOX_SIZE > best) best = b.y + BOX_SIZE;
+    tops.push(b.y + BOX_SIZE);
   }
-  return best;
+  for (const e of standableExtendersUnder(level, x, z)) {
+    if (e.id !== ignoreId) tops.push(e.y);
+  }
+  tops.sort((a, b) => a - b);
+  return tops.filter((y, i) => i === 0 || y - tops[i - 1]! > SURFACE_EPS);
 }
 
-/** Is `y` the ground, or the top of a platform / crate at this spot? */
-function restsOnSurface(level: LevelDef, x: number, y: number, z: number, ignoreId?: string): boolean {
+/**
+ * Is `y` the ground, or the top of a platform / crate / standable extender at
+ * this spot?
+ */
+export function restsOnSurface(level: LevelDef, x: number, y: number, z: number, ignoreId?: string): boolean {
   if (Math.abs(y) < SURFACE_EPS) return true; // the terrain itself
   if (platformsUnder(level, x, z).some((p) => p.id !== ignoreId && Math.abs(p.y - y) < SURFACE_EPS)) return true;
+  if (standableExtendersUnder(level, x, z).some((e) => e.id !== ignoreId && Math.abs(e.y - y) < SURFACE_EPS)) {
+    return true;
+  }
   return (level.terrain?.boxes ?? []).some(
     (b) =>
       b.id !== ignoreId &&
@@ -66,7 +99,7 @@ function checkTerrain(level: LevelDef, errors: string[]): void {
     if (terrain && !g.at) errors.push(`generator ${g.id} needs an \`at\` position on a platformer level`);
     if (!terrain && g.at) errors.push(`generator ${g.id} has an \`at\` position but the level has no terrain`);
     if (g.at && !restsOnSurface(level, g.at.x, g.at.y, g.at.z)) {
-      errors.push(`generator ${g.id} floats at y=${g.at.y} — no ground, platform or crate top there`);
+      errors.push(`generator ${g.id} floats at y=${g.at.y} — no ground, platform, crate or extender top there`);
     }
   }
   if (!terrain) return;
@@ -82,7 +115,7 @@ function checkTerrain(level: LevelDef, errors: string[]): void {
     if (ids.has(b.id)) errors.push(`duplicate terrain id ${b.id}`);
     ids.add(b.id);
     if (!restsOnSurface(level, b.x, b.y, b.z, b.id)) {
-      errors.push(`crate ${b.id} floats at y=${b.y} — it must start on the ground or on a platform`);
+      errors.push(`crate ${b.id} floats at y=${b.y} — it must start on the ground or on a platform top`);
     }
     // A crate whose footprint is inside a platform's would be stuck forever.
     for (const p of platformsUnder(level, b.x, b.z)) {
