@@ -330,6 +330,8 @@ export class GameController {
     this.hud.setTurn(this.level, this.makeState(state.presses, state.history));
     const counts = currentCounts(this.level, state.presses);
     this.field.setCounts(counts);
+    // A platform whose condition already holds at level start is simply out.
+    this.terrain.setCounts(counts, false);
     this.hud.setCounts(counts);
     this.updateUndoAvailability(state.history);
     this.walkthrough.setLevel(this.level);
@@ -349,6 +351,7 @@ export class GameController {
     if (this.stepPads) this.tutorial.onFirstStepPad();
     if ((this.level.terrain?.platforms.length ?? 0) > 0) this.tutorial.onFirstPlatforms();
     if ((this.level.terrain?.boxes.length ?? 0) > 0) this.tutorial.onFirstCrate();
+    if (this.terrain.hasExtenders) this.tutorial.onFirstExtender();
     if (this.level.generators.some((g) => g.outputs.length > 1 || g.outputs[0].count > 1)) {
       this.tutorial.onFirstMultiOutput();
     }
@@ -410,6 +413,9 @@ export class GameController {
     this.lastPresses = { ...state.presses };
     const counts = currentCounts(this.level, state.presses);
     this.field?.setCounts(counts, spawnPoints);
+    // Extending platforms are pure functions of the counts, so reaching out and
+    // pulling back in needs nothing more than this — in either play mode.
+    this.terrain?.setCounts(counts);
     this.hud.setCounts(counts);
     this.updateUndoAvailability(state.history);
 

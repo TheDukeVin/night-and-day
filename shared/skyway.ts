@@ -6,6 +6,10 @@
 //   2. Pushable crates. Walk into a crate and it slides — it never turns — so
 //      you can park it beside a platform that is too tall to jump and use it as
 //      a step.
+//   3. Extending platforms: white slabs that grow a bridge while one crystal
+//      count is exactly right, and pull it back in the moment it isn't. The mini
+//      crystals on top say which count — so for the first time the ARITHMETIC
+//      changes the shape of the level.
 //
 // Everything else is unchanged: same sunset/day/night atmosphere, same
 // generators, same "make day and night match" goal. Only *reaching* a generator
@@ -93,6 +97,44 @@ export const SKYWAY_LEVELS: LevelDef[] = [
         { id: 'p2', x: 12, z: 18, w: 8, d: 8, y: 4 },
       ],
       boxes: [{ id: 'b1', x: 12, z: 27, y: 0 }],
+    },
+  },
+  {
+    index: 4,
+    name: 'The Counting Bridge',
+    concept: 'A bridge that appears when the count is exactly right',
+    intro:
+      'The white platform only reaches out while Day has EXACTLY 4 red crystals — count the little crystals on top of it. Build the bridge, then cross to the night generator!',
+    initial: { red: { day: 0, night: 1 } },
+    generators: [
+      gen('d1', 'day', [['red', 2]], { x: -9, y: 0, z: 24 }),
+      gen('n1', 'night', [['red', 3]], { x: 16, y: 4, z: 10 }),
+    ],
+    // Two presses of d1 make Day's red exactly 4, which is what puts the bridge
+    // out; a third would pull it straight back in. Then one press across the gap
+    // brings Night from 1 to 4 and the sides match.
+    solution: { d1: 2, n1: 1 },
+    terrain: {
+      spawn: { x: 0, z: 32 },
+      platforms: [
+        { id: 'p1', x: 0, z: 18, w: 8, d: 8, y: 2 },
+        { id: 'p2', x: 0, z: 10, w: 8, d: 8, y: 4 },
+        { id: 'p3', x: 16, z: 10, w: 8, d: 8, y: 4 },
+      ],
+      boxes: [],
+      extenders: [
+        {
+          id: 'e1',
+          x: 5,
+          z: 10,
+          w: 2,
+          d: 6,
+          y: 4,
+          dir: '+x',
+          length: 7,
+          when: { color: 'red', side: 'day', count: 4 },
+        },
+      ],
     },
   },
 ];

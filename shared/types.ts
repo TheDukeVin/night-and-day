@@ -54,10 +54,49 @@ export interface BoxDef {
   y: number; // base (bottom face) height
 }
 
+/** The six world directions an extending platform can grow along. */
+export type ExtendDirection = '+x' | '-x' | '+z' | '-z' | '+y' | '-y';
+
+/**
+ * When an extending platform reaches out: while the named crystal count is
+ * EXACTLY `count`, e.g. `{ color: 'red', side: 'day', count: 4 }` = "while Day
+ * has exactly 4 red crystals". One press too many and it pulls back in.
+ */
+export interface ExtendCondition {
+  color: CrystalColor;
+  side: Side;
+  count: number;
+}
+
+/**
+ * A white magic platform. It is a thin slab floating where it was placed (you
+ * can walk underneath it, unlike a stone platform), and while its condition
+ * holds it grows an arm `length` units along `dir` — a bridge, a step, or a
+ * pillar. The moment the count stops matching, the arm retracts.
+ *
+ * The condition is read straight off the derived crystal counts, so the state
+ * of every extender is a pure function of `GameState`: nothing to network, and
+ * both players always see the same bridge.
+ */
+export interface ExtendingPlatformDef {
+  id: string;
+  x: number; // center
+  z: number; // center
+  w: number; // full size along x
+  d: number; // full size along z
+  y: number; // height of the top face
+  dir: ExtendDirection;
+  /** How far the arm reaches past the slab when fully extended. */
+  length: number;
+  when: ExtendCondition;
+}
+
 /** Hand-authored geometry for a platformer level. */
 export interface LevelTerrain {
   platforms: PlatformDef[];
   boxes: BoxDef[];
+  /** White platforms that reach out while a crystal count matches. */
+  extenders?: ExtendingPlatformDef[];
   /** Where the players start; defaults to the classic spawn when omitted. */
   spawn?: { x: number; z: number };
 }
