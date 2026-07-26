@@ -13,7 +13,7 @@ import { clearTweens, updateTweens } from './anim.ts';
 import { playBalanceAnimation } from './balance.ts';
 import { CrystalField } from './crystals.ts';
 import type { SpawnPoint } from './crystals.ts';
-import { buildGenerators, GeneratorStand, PEDESTAL_COLLIDER_RADIUS } from './generators.ts';
+import { buildGenerators, GeneratorStand, PEDESTAL_COLLIDER_RADIUS, RING_RADIUS } from './generators.ts';
 import { Guides } from './guides.ts';
 import { IntroSequence } from './intro.ts';
 import { Player, RemotePlayer } from './player.ts';
@@ -25,6 +25,13 @@ import { World } from './world.ts';
 import type { Atmosphere } from './world.ts';
 
 const INTERACT_RANGE = 8;
+
+/** Step-pad trigger: the ring plus the player's own radius (they overlap it). */
+const STEP_PAD_RADIUS = RING_RADIUS + 0.5;
+/** Leaving takes a little more, so hugging the edge doesn't fire repeatedly. */
+const STEP_PAD_RELEASE = STEP_PAD_RADIUS + 0.5;
+/** How far above/below a stand's base the pad still counts (mirrors the collider band). */
+const STEP_PAD_BAND = 2.5;
 
 /** Default spawn (classic levels); Skyway levels override it via `terrain.spawn`. */
 const DEFAULT_SPAWN = { x: 0, z: 22 };
@@ -41,6 +48,13 @@ export class GameController {
   private terrain: Terrain | null = null;
   /** Whether the level just left had platforms (drives the respawn on load). */
   private wasPlatformer = false;
+  /**
+   * Platformer levels swap clicking for step pads: a generator fires when the
+   * player walks into the glow ring at its base.
+   */
+  private stepPads = false;
+  /** Generator ids the player is currently standing in the ring of. */
+  private onPad = new Set<string>();
   private stands: GeneratorStand[] = [];
   private levelGroup = new THREE.Group();
   private hud: Hud;
@@ -131,6 +145,7 @@ export class GameController {
         balances: this.myBalances,
       }),
       pressAnchor: () => this.pressAnchor(),
+      pressGlyph: () => (this.stepPads ? '👣' : '👆'),
       balanceButton: this.hud.balanceButton,
     });
     uiRoot().append(this.guides.root);
@@ -289,6 +304,10 @@ export class GameController {
       this.player.placeAt(spawn.x + lane, spawn.z);
     }
     this.wasPlatformer = this.terrain.hasTerrain;
+    // Platformer levels are the step-pad ones: you reach a generator with your
+    // feet, so using it is walking into it rather than clicking it.
+    this.stepPads = this.terrain.hasTerrain;
+    this.onPad.clear();
 
     this.stands = buildGenerators(this.level, this.world.heightAt);
     this.stands.forEach((stand, i) => {
@@ -327,6 +346,7 @@ export class GameController {
     // generic press/balance coach marks are suppressed to avoid double cues.
     if (!this.level.tutorial && this.stands.some((s) => this.canPress(s))) this.guides.unlock('press');
     this.tutorial.onLevelWithGenerators();
+    if (this.stepPads) this.tutorial.onFirstStepPad();
     if ((this.level.terrain?.platforms.length ?? 0) > 0) this.tutorial.onFirstPlatforms();
     if ((this.level.terrain?.boxes.length ?? 0) > 0) this.tutorial.onFirstCrate();
     if (this.level.generators.some((g) => g.outputs.length > 1 || g.outputs[0].count > 1)) {
@@ -530,9 +550,25 @@ export class GameController {
     return document.pointerLockElement === this.renderer.domElement;
   }
 
-  /** Raycast the pointer each frame and outline the hovered generator. */
+  /**
+   * Outline the generator the player is "on": the one under the pointer on
+   * classic levels, or the one whose ring they are standing in on platformer
+   * levels (where the pointer means nothing).
+   */
   private updateHover(): void {
     let hovered: GeneratorStand | null = null;
+    if (this.stepPads) {
+      for (const stand of this.stands) {
+        if (!stand.isSolid() || !stand.isActive()) continue;
+        if (this.onPad.has(stand.def.id)) {
+          hovered = stand;
+          break;
+        }
+      }
+      for (const stand of this.stands) stand.setHovered(stand === hovered);
+      this.renderer.domElement.style.cursor = '';
+      return;
+    }
     const locked = this.isPointerLocked();
     if ((locked || this.pointerActive) && this.level && !this.busy && !this.intro) {
       const ndc = locked ? new THREE.Vector2(0, 0) : this.pointer;
@@ -551,6 +587,9 @@ export class GameController {
 
   private onClick = (event: MouseEvent): void => {
     if (this.busy || !this.level || this.intro) return;
+    // Platformer levels have no clickable generators at all — you step into the
+    // ring instead (see `updateStepPads`).
+    if (this.stepPads) return;
     const locked = this.isPointerLocked();
     // In pointer-lock mode, the first click only engages the cursor lock
     // (requested by Player's mousedown handler) — it isn't a game action yet.
@@ -572,28 +611,69 @@ export class GameController {
         showToast('Walk closer to the generator to use it!', 3);
         return;
       }
-      if (!this.canPress(stand)) {
-        stand.deny();
-        const active = this.currentActiveSide();
-        if (active !== null) {
-          // Cycle level, wrong turn: gentle "wait your turn" nudge.
-          showToast(`It's ${active === 'day' ? 'Day' : 'Night'}'s turn right now — hold on!`, 4);
-        } else {
-          showToast(
-            this.channel.role === 'day'
-              ? 'That is a night generator — only Night can press it. Team up!'
-              : 'That is a day generator — only Day can press it. Team up!',
-            4
-          );
-        }
-        return;
-      }
-      this.myPresses++;
-      if (!this.level?.tutorial) this.guides.unlock('balance');
-      this.channel.send({ t: 'press', gen: stand.def.id });
+      this.attemptPress(stand);
       return;
     }
   };
+
+  /**
+   * Send a press for `stand`, or explain (and flash it) if this player may not
+   * use it right now. Shared by clicking (classic levels) and stepping into the
+   * ring (platformer levels).
+   */
+  private attemptPress(stand: GeneratorStand): void {
+    if (!this.canPress(stand)) {
+      stand.deny();
+      const active = this.currentActiveSide();
+      if (active !== null) {
+        // Cycle level, wrong turn: gentle "wait your turn" nudge.
+        showToast(`It's ${active === 'day' ? 'Day' : 'Night'}'s turn right now — hold on!`, 4);
+      } else {
+        showToast(
+          this.channel.role === 'day'
+            ? 'That is a night generator — only Night can press it. Team up!'
+            : 'That is a day generator — only Day can press it. Team up!',
+          4
+        );
+      }
+      return;
+    }
+    this.myPresses++;
+    if (!this.level?.tutorial) this.guides.unlock('balance');
+    this.channel.send({ t: 'press', gen: stand.def.id });
+  }
+
+  /**
+   * Platformer levels: a generator fires when the player walks into the glow
+   * ring at its base. It fires once per entry — you have to step back out (past
+   * a slightly wider ring, so brushing the edge doesn't stutter) before it can
+   * fire again. The pedestal collider stops the player at 1.6 from the centre,
+   * which is comfortably inside the trigger, so walking up to a stand always
+   * counts.
+   */
+  private updateStepPads(): void {
+    if (!this.stepPads || !this.level) return;
+    const p = this.player.mesh.position;
+    const feet = this.player.groundHeight;
+    for (const stand of this.stands) {
+      const dx = p.x - stand.root.position.x;
+      const dz = p.z - stand.root.position.z;
+      const dist = Math.hypot(dx, dz);
+      // A stand on a platform must not fire from the ground underneath it.
+      const reachable = Math.abs(feet - stand.root.position.y) <= STEP_PAD_BAND;
+      const was = this.onPad.has(stand.def.id);
+      const inside = reachable && dist <= (was ? STEP_PAD_RELEASE : STEP_PAD_RADIUS);
+      if (inside === was) continue;
+      if (inside) {
+        this.onPad.add(stand.def.id);
+        // Sinking/rising stands and paused moments (intro, balance animation)
+        // arm the pad but don't fire it.
+        if (stand.isSolid() && !this.busy && !this.intro) this.attemptPress(stand);
+      } else {
+        this.onPad.delete(stand.def.id);
+      }
+    }
+  }
 
   // ---------- Server messages ----------
 
@@ -722,6 +802,7 @@ export class GameController {
     this.world.update(dt, this.player.mesh.position);
     for (const stand of this.stands) stand.update(dt, this.camera);
     this.intro?.update();
+    this.updateStepPads();
     this.updateHover();
     this.guides.update();
     this.walkthrough.update();

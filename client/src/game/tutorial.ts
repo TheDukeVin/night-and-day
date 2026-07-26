@@ -58,6 +58,11 @@ export class Tutorial {
     this.offer('multi-output', 'Some generators make several crystals — or several COLORS — with one press. Check the sign carefully!');
   }
 
+  /** First step-pad level: generators fire by walking in, not by clicking. */
+  onFirstStepPad(): void {
+    this.offer('step-pad', 'Up here you use a generator with your FEET — walk into its glowing ring! Step out and back in to use it again.');
+  }
+
   /** First platformer level: generators are no longer all at ground level. */
   onFirstPlatforms(): void {
     this.offer('jump', 'Some generators are up on stone platforms. Press SPACE to jump — hold it to keep hopping!');

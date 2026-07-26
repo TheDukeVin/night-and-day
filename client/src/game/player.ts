@@ -209,6 +209,11 @@ export class Player {
   get heldKeys(): ReadonlySet<string> {
     return this.keys;
   }
+
+  /** Physics height of the feet, without the walk/idle bob. */
+  get groundHeight(): number {
+    return this.feetY;
+  }
   private onKeyUp = (e: KeyboardEvent) => this.keys.delete(e.code);
   private onBlur = () => this.keys.clear();
   private onMouseDown = (e: MouseEvent) => {

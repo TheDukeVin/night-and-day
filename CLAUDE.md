@@ -105,6 +105,15 @@ production the WebSocket is same-origin on :8787. Stop stray servers with
     (`JUMP_SPEED²/2·GRAVITY` ≈ 2.4) is what the pack's heights are built around —
     a 2-unit step is always reachable, 4 needs a crate. Generator colliders carry
     a `y` so a stand on a platform doesn't wall off the ground below it.
+  - **Generators on these levels are step pads, not click targets.** Any level
+    with terrain sets `GameController.stepPads`: clicking generators is disabled
+    entirely and `updateStepPads()` fires one press when the player walks into
+    the glow ring at a stand's base (`RING_RADIUS` + the player's radius, with a
+    slightly wider release radius so hugging the edge doesn't stutter, and a
+    height band so a stand up on a platform can't fire from the ground below).
+    Press and denial handling is shared with clicking via `attemptPress`. The
+    press coach mark swaps its 👆 for 👣 (`GuideOptions.pressGlyph`) and the
+    `step-pad` text tip introduces the mechanic.
   - Crates are **not** in `GameState`: they never affect the balance math, so in
     2-player they are relayed to the peer like `pose` (the `boxes` message) by
     whoever pushed them, and `reset` restores them from the level def. `PlayerPose`
@@ -137,13 +146,14 @@ production the WebSocket is same-origin on :8787. Stop stray servers with
     frame via `pressAnchor()`); a bouncing **arrow** over the glowing Balance
     button.
   - **Text tips** (`client/src/game/tutorial.ts`, ids `role-day|role-night|goal|
-    multi-output|balance|jump|push`): short toasts for what a picture can't convey
-    — role (day/night), the balance goal, multi-output, and the two Skyway
-    mechanics. The `move`/`generator` tips were intentionally removed; the visual
-    cues teach those.
+    multi-output|balance|jump|push|step-pad`): short toasts for what a picture
+    can't convey — role (day/night), the balance goal, multi-output, and the
+    three Skyway mechanics. The `move`/`generator` tips were intentionally
+    removed; the visual cues teach those.
   Both pause/resume with the intro cutscene and respect `settings.showTutorials`
-  and `prefers-reduced-motion`. The Skyway mechanics add two text tips (`jump`,
-  `push`), fired from `buildLevel` when a level first has platforms or crates.
+  and `prefers-reduced-motion`. The Skyway mechanics add three text tips
+  (`jump`, `push`, `step-pad`), fired from `buildLevel` when a level first has
+  platforms, crates, or terrain at all.
 - **Tutorial levels** (`tutorial: true` on `LevelDef` — sheet levels 1, 2, 14,
   15) run a *scripted* solution walkthrough (`client/src/game/walkthrough.ts`),
   separate from the once-per-account coach marks: it reads the level's stored

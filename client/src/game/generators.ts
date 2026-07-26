@@ -32,6 +32,12 @@ const CROWN_Y = 2.4;
 /** Horizontal radius a player is pushed out to when bumping a generator's spot;
  * kept snug so players can still slip between neighbours. */
 export const PEDESTAL_COLLIDER_RADIUS = 1.1;
+/**
+ * Radius of the glow ring lying on the ground — the generator's footprint. On
+ * platformer (Skyway) levels this circle is the trigger: step into it and the
+ * generator fires. See `GameController.updateStepPads`.
+ */
+export const RING_RADIUS = 1.8;
 
 // Scratch vectors for the per-frame sky test, so it allocates nothing.
 const SKY_TMP = new THREE.Vector3();
@@ -94,7 +100,7 @@ export class GeneratorStand {
     // Glow ring on the ground marking the side (the only thing left where the
     // pedestal used to stand — it lies flat, so it never hides ground crystals).
     this.ring = new THREE.Mesh(
-      new THREE.TorusGeometry(1.8, 0.08, 8, 32),
+      new THREE.TorusGeometry(RING_RADIUS, 0.08, 8, 32),
       new THREE.MeshBasicMaterial({ color: isDay ? 0xffc776 : 0x8ea6ff, transparent: true, opacity: 0.9 })
     );
     this.ring.rotation.x = Math.PI / 2;
