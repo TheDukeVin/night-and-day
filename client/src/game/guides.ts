@@ -35,6 +35,8 @@ export interface GuideOptions {
   watch: () => GuideWatch;
   /** Screen position of the generator the press guide should point at. */
   pressAnchor: () => { x: number; y: number } | null;
+  /** Glyph over that generator: a pointing hand to click, footprints to step in. */
+  pressGlyph: () => string;
   /** The Balance button, so its guide can sit right above it. */
   balanceButton: HTMLElement;
 }
@@ -148,7 +150,7 @@ export class Guides {
     const card = el('div', { className: `guide-card guide-${id}` });
     if (id === 'move') card.append(this.buildKeycaps());
     else if (id === 'look') card.append(buildMouse());
-    else if (id === 'press') card.append(el('div', { className: 'guide-ring' }), el('div', { className: 'guide-hand', text: '👆' }));
+    else if (id === 'press') card.append(el('div', { className: 'guide-ring' }), el('div', { className: 'guide-hand', text: this.opts.pressGlyph() }));
     else card.append(el('div', { className: 'guide-arrow', text: '▼' }));
     this.root.append(card);
     return card;
