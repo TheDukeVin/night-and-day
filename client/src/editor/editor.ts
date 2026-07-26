@@ -243,6 +243,13 @@ const snap = (v: number): number => Math.round(v);
  * rectangle that was just drawn.
  */
 const snapCenter = (v: number): number => Math.round(v * 2) / 2;
+/**
+ * Moving something keeps the alignment it already has: an odd-width block is
+ * centered on a half unit, so rounding its new center to a whole number would
+ * slide its edges off the grid. Snapping *relative to where it sits* moves it by
+ * whole units instead — and makes a click that jitters a pixel a no-op.
+ */
+const snapLike = (v: number, ref: number): number => Math.round(v - ref) + ref;
 
 // ---------- Canvas: drawing ----------
 
@@ -501,7 +508,8 @@ interface DrawPlatformDrag {
 type Drag =
   | DrawPlatformDrag
   | { kind: 'pan'; sx: number; sy: number; ox: number; oz: number }
-  | { kind: 'move'; target: Selection; dx: number; dz: number }
+  /** `ox`/`oz` is where the target started — new positions snap relative to it. */
+  | { kind: 'move'; target: Selection; dx: number; dz: number; ox: number; oz: number }
   | null;
 
 let drag: Drag = null;
@@ -559,7 +567,7 @@ function onCanvasDown(e: MouseEvent): void {
       selection = hit;
       if (hit) {
         const p = positionOf(hit);
-        drag = { kind: 'move', target: hit, dx: p.x - w.x, dz: p.z - w.z };
+        drag = { kind: 'move', target: hit, dx: p.x - w.x, dz: p.z - w.z, ox: p.x, oz: p.z };
       }
       buildPanel();
       drawCanvas();
@@ -585,7 +593,11 @@ function onCanvasMove(e: MouseEvent): void {
     return;
   }
   if (drag.kind === 'move' && drag.target) {
-    setPosition(drag.target, snap(w.x + drag.dx), snap(w.z + drag.dz));
+    setPosition(
+      drag.target,
+      snapLike(w.x + drag.dx, drag.ox),
+      snapLike(w.z + drag.dz, drag.oz)
+    );
     changed(false);
   }
 }
