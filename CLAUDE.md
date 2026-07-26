@@ -197,8 +197,12 @@ production the WebSocket is same-origin on :8787. Stop stray servers with
     own shove), but **both** are registered there from their poses — so a platform
     pausing for a wedged body is one decision both players see, not a local guess.
     `validateLevel` rejects a condition the level can never
-    reach (counts only grow from `initial`), and `surfaceUnder` deliberately
-    excludes them so nothing is ever authored resting on one. They may sit at
+    reach (counts only grow from `initial`). Their **slab never moves — only the
+    arm does** — so a slab top counts as a surface (`standableExtendersUnder` in
+    `shared/validate.ts`, folded into `surfaceUnder`/`surfacesUnder`/
+    `restsOnSurface`) and crates and generators may be authored on one. The single
+    exception is a **`+y`** platform: its pillar grows straight out of the top
+    face, so nothing may rest there. They may sit at
     `y: 0`, **flush with the floor** (stone may not) — a flush slab's mesh is
     nudged up by `FLUSH_LIFT` so it doesn't z-fight the terrain. Visually: white,
     with one mini crystal per crystal the condition wants **set into the top
@@ -283,11 +287,16 @@ it takes over the other character where it stands (`swapPlayers()`: re-skin both
 bodies, exchange positions, re-badge the HUD, re-arm step pads so taking over never
 fires a free press). No second renderer, no server, no room.
 
-Two invariants worth keeping:
-- Every mutation runs `resettle()`, which drops each crate and generator onto the
-  surface beneath it. A floating generator is a level the verifier rejects, so the
-  editor simply never lets that state exist. Extending platforms are exempt in
-  both directions: they float where you put them, and nothing settles onto one.
+Invariants worth keeping:
+- Every mutation runs `resettle()`, which drops each crate onto the surface
+  beneath it and each generator onto the nearest one. A floating generator is a
+  level the verifier rejects, so the editor simply never lets that state exist.
+  Extending platforms themselves never settle — they float where you put them —
+  but things do settle *onto* them unless they grow `+y`.
+- A generator **keeps the height it is given** as long as that is still a real
+  surface, and the inspector offers a **height** picker listing every surface at
+  its (x, z) — so a stand can be authored on the ground *under* an overhang, not
+  only on top of it. It is a pick from real surfaces, never a free number.
 - The extender tool draws like the platform tool (drag a rectangle); its arm is
   drawn dashed in the plan view — where the platform *will* be, not where it is.
 - `solve.ts` searches the **day−night difference** space, not press counts: one

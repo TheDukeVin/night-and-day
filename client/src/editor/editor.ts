@@ -17,7 +17,13 @@ import { GameController } from '../game/level.ts';
 import { HotSeatChannel, LoopbackChannel } from '../net/client.ts';
 import { registerPack } from '../../../shared/packs.ts';
 import { BOX_SIZE } from '../../../shared/skyway.ts';
-import { surfaceUnder, validateLevel } from '../../../shared/validate.ts';
+import {
+  platformsUnder,
+  standableExtendersUnder,
+  surfaceUnder,
+  surfacesUnder,
+  validateLevel,
+} from '../../../shared/validate.ts';
 import type {
   BoxDef,
   CrystalColor,
@@ -177,13 +183,20 @@ function changed(rebuildPanel = true): void {
  * would otherwise leave things floating, and a floating generator is a level
  * the verifier rejects — so the editor simply never lets that state exist.
  * Crates settle bottom-up so a stack lands in the right order.
+ *
+ * A generator keeps the height it was given as long as that is still a real
+ * surface (an author may want one on the ground *under* an overhang); when the
+ * geometry moves out from under it, it lands on the nearest surface instead.
  */
 function resettle(): void {
   const lv = level();
   const boxes = [...(lv.terrain?.boxes ?? [])].sort((a, b) => a.y - b.y);
   for (const b of boxes) b.y = surfaceUnder(lv, b.x, b.z, b.id);
   for (const g of lv.generators) {
-    if (g.at) g.at.y = surfaceUnder(lv, g.at.x, g.at.z);
+    if (!g.at) continue;
+    const options = surfacesUnder(lv, g.at.x, g.at.z);
+    const want = g.at.y;
+    g.at.y = options.reduce((best, y) => (Math.abs(y - want) < Math.abs(best - want) ? y : best), options[0]!);
   }
 }
 
@@ -1076,6 +1089,13 @@ function sectionSelection(): HTMLElement {
       labeled('height', numInput(e.y, (v) => { e.y = Math.max(0, v); changed(); }, 1, 0)),
       labeled('extends', select(ALL_DIRECTIONS, e.dir, (v) => { e.dir = v; changed(); }, (v) => DIRECTION_LABEL[v])),
       labeled('reach', numInput(e.length, (v) => { e.length = Math.max(1, v); changed(); }, 1, 1)),
+      el('div', {
+        className: 'editor-note',
+        text:
+          e.dir === '+y'
+            ? 'Its pillar grows straight out of the top face, so nothing can be placed up there.'
+            : 'The slab itself never moves — only the arm does — so crates and generators may rest on top of it.',
+      }),
       el('h4', { text: 'Reaches out while…' }),
       row([
         select(ALL_COLORS, e.when.color, (v) => { e.when.color = v; changed(); }),
@@ -1135,7 +1155,7 @@ function sectionSelection(): HTMLElement {
       labeled('x', numInput(g.at!.x, (v) => { g.at!.x = v; changed(); })),
       labeled('z', numInput(g.at!.z, (v) => { g.at!.z = v; changed(); })),
     ]),
-    el('div', { className: 'editor-note', text: `Stands at height ${g.at!.y}.` }),
+    heightField(g),
     el('h4', { text: 'Produces per press' }),
     ...outputRows,
     button('+ Output', () => {
@@ -1144,6 +1164,49 @@ function sectionSelection(): HTMLElement {
     }, 'editor-btn'),
     button('Delete', deleteSelection, 'editor-btn danger'),
   ]);
+}
+
+/**
+ * Which surface a generator stands on. A stand must rest on something real (a
+ * floating one is a level the verifier rejects), so this is a pick from the
+ * surfaces that actually exist at its (x, z) — the ground, a platform top, a
+ * crate top — rather than a free number. With only the ground under it there is
+ * nothing to choose, so it stays a note.
+ */
+function heightField(g: GeneratorDef): HTMLElement {
+  const lv = level();
+  const options = surfacesUnder(lv, g.at!.x, g.at!.z);
+  if (options.length < 2) {
+    return el('div', { className: 'editor-note', text: `Stands at height ${g.at!.y} — nothing else is under it here.` });
+  }
+  return el('div', {}, [
+    labeled(
+      'height',
+      select(
+        options.map((y) => String(y)),
+        String(g.at!.y),
+        (v) => { g.at!.y = Number(v); changed(); },
+        (v) => `${v} — ${surfaceName(lv, g.at!.x, g.at!.z, Number(v))}`
+      )
+    ),
+    el('div', {
+      className: 'editor-note',
+      text: 'A stand can sit on the ground under an overhang, or up on what covers it.',
+    }),
+  ]);
+}
+
+/** What the surface at this height is, for the height picker's labels. */
+function surfaceName(lv: LevelDef, x: number, z: number, y: number): string {
+  if (y === 0) return 'ground';
+  const p = platformsUnder(lv, x, z).find((q) => q.y === y);
+  if (p) return `on platform ${p.id}`;
+  const e = standableExtendersUnder(lv, x, z).find((q) => q.y === y);
+  if (e) return `on extending platform ${e.id}`;
+  const b = (lv.terrain?.boxes ?? []).find(
+    (q) => q.y + BOX_SIZE === y && Math.abs(x - q.x) <= BOX_SIZE / 2 && Math.abs(z - q.z) <= BOX_SIZE / 2
+  );
+  return b ? `on crate ${b.id}` : 'on a platform';
 }
 
 function sectionGenerators(): HTMLElement {
