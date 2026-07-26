@@ -134,6 +134,14 @@ production the WebSocket is same-origin on :8787. Stop stray servers with
     and presses the generator again.
     Press and denial handling is shared with clicking via `attemptPress`. The
     `step-pad` text tip introduces the mechanic.
+  - **These levels are played cursor-locked.** The mouse only ever steers here —
+    there is nothing to click — so `buildLevel` sets a camera-mode override
+    (`setCameraModeOverride` in `client/src/settings.ts`; everything asks
+    `cameraMode()`, never `getSettings().cameraMode`) and grabs the pointer as the
+    level comes up. Esc is the browser's own way out, and it drops full screen with
+    it, so ⛶ (a `fullscreenchange` into full screen) re-takes the lock; clicking the
+    scene does too. `showDialog` releases the pointer, because a locked player
+    cannot click a modal's buttons. Classic levels keep the stored setting.
   - **These levels balance themselves, and have no Undo.** `GameController.autoBalance`
     (also `Terrain.isPlatformer`) sends the `balance` intent the moment
     `applyState` sees every color matched — there is no ⚖ Balance button, and no
@@ -142,7 +150,13 @@ production the WebSocket is same-origin on :8787. Stop stray servers with
     hides both; a **Pass** button still appears if such a level is ever a Cycle
     level. Nothing changed server-side — the same `balance` message, guarded by
     `solved`, so in 2-player both clients firing it is harmless. The balance
-    coach mark and its "press ⚖ Balance" text tip are suppressed here.
+    coach mark and its "press ⚖ Balance" text tip are suppressed here. Because the
+    match lands the same instant the last crystals are made, `playBalanceAnimation`
+    **waits for them to land** — `CrystalField.settleTime()` says how long the birth
+    flights still need, and the ceremony starts a beat after that (`settle()` then
+    only tidies up). So you watch the last crystal reach the stack, which is what
+    shows you *why* the sides now match, and the ceremony starts from the stacks
+    rather than from the generator the crystal was still crossing the map from.
   - **Crates and arms are game state, and the session owns them.** Which side of
     a gap a crate ended up on decides whether a generator can be reached at all,
     so they belong in `GameState.terrain` next to the press counts, not in a

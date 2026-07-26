@@ -21,6 +21,13 @@ export function tween(opts: {
   return tw;
 }
 
+/** Drop a tween mid-flight; its `onDone` never runs. Safe on an already-finished one. */
+export function cancelTween(tw: Tween | null | undefined): void {
+  if (!tw) return;
+  const i = active.indexOf(tw);
+  if (i >= 0) active.splice(i, 1);
+}
+
 export function easeInOut(t: number): number {
   return t * t * (3 - 2 * t);
 }

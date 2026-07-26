@@ -6,11 +6,30 @@ import * as THREE from 'three';
 import type { CrystalField } from './crystals.ts';
 import { easeInOut, tween } from './anim.ts';
 
+/** A beat between the last crystal landing on its stack and the ceremony starting. */
+const ARRIVAL_PAUSE = 0.2;
+
 export function playBalanceAnimation(
   scene: THREE.Scene,
   field: CrystalField,
   onDone: () => void
 ): void {
+  // On a level that weighs itself the sides match the instant the last crystals
+  // are made, while they are still flying over from the generator. Let them land
+  // — watching a crystal arrive is how you see WHY the sides now match — and take
+  // the stacks as the ceremony's starting line.
+  const wait = field.settleTime();
+  if (wait > 0) {
+    tween({ duration: 0.01, delay: wait + ARRIVAL_PAUSE, onUpdate: () => {}, onDone: () => start(scene, field, onDone) });
+    return;
+  }
+  start(scene, field, onDone);
+}
+
+function start(scene: THREE.Scene, field: CrystalField, onDone: () => void): void {
+  // Nothing should still be in flight by now; this only tidies up the odd
+  // crystal whose animation outlived the wait.
+  field.settle();
   const clusters = field.getClusters();
   const byColor = new Map<string, { day?: (typeof clusters)[0]; night?: (typeof clusters)[0] }>();
   for (const cluster of clusters) {
