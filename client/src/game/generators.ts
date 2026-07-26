@@ -404,8 +404,21 @@ function makeSignSprite(def: GeneratorDef): THREE.Sprite {
 /**
  * Lay out all generators for a level: a row per side in front of (+z of) that
  * side's crystal platform, so players see both rings and the generators at once.
+ *
+ * Platformer levels place each generator by hand instead (`GeneratorDef.at`) —
+ * on a stone platform, a crate, or the ground.
  */
 export function buildGenerators(level: LevelDef, heightAt: (x: number, z: number) => number): GeneratorStand[] {
+  if (level.generators.every((g) => g.at)) {
+    return level.generators.map((def) => {
+      const at = def.at!;
+      // Ground-level stands are authored as y = 0; snap them to the rolling
+      // terrain so the glow ring never sinks into a rise.
+      const pos = new THREE.Vector3(at.x, Math.max(at.y, heightAt(at.x, at.z)), at.z);
+      return new GeneratorStand(def, pos);
+    });
+  }
+
   // Clear the platform's front edge (its footprint stretches along z with the color count).
   const depth = Math.max(1, collectColors(level).length) * 6 + 4;
   const frontZ = (5.0 * depth) / 8.8 + 3;

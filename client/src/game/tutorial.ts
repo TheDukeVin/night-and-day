@@ -58,6 +58,16 @@ export class Tutorial {
     this.offer('multi-output', 'Some generators make several crystals — or several COLORS — with one press. Check the sign carefully!');
   }
 
+  /** First platformer level: generators are no longer all at ground level. */
+  onFirstPlatforms(): void {
+    this.offer('jump', 'Some generators are up on stone platforms. Press SPACE to jump — hold it to keep hopping!');
+  }
+
+  /** First level with a pushable crate. */
+  onFirstCrate(): void {
+    this.offer('push', 'Too high to jump? Walk into a stone crate to push it. Park one beside a platform and use it as a step!');
+  }
+
   onFirstBalanceReady(): void {
     this.offer('balance', 'Think the sides match? Press the ⚖ Balance button to find out — matching crystals will cancel each other out.');
   }

@@ -5,7 +5,7 @@
 // game runs, so what you see here is what players see.
 
 import * as THREE from 'three';
-import { STARTER_PACK_NAME } from '../../../shared/levels.ts';
+import { DEFAULT_PACK_ID, getPack } from '../../../shared/packs.ts';
 import { getSettings, pixelRatioFor } from '../settings.ts';
 import { el, uiRoot } from '../screens/ui.ts';
 import { IntroSequence } from './intro.ts';
@@ -15,7 +15,7 @@ import { World } from './world.ts';
 /** Pause between one playthrough finishing and the next starting, in seconds. */
 const REPLAY_GAP = 1.2;
 
-export function runCutscene(packName = STARTER_PACK_NAME): void {
+export function runCutscene(packName = getPack(DEFAULT_PACK_ID).name): void {
   const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
   const highQuality = getSettings().quality === 'high';
 

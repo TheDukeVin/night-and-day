@@ -2,7 +2,7 @@
 // levels, routes input to the game channel and reacts to authoritative state.
 
 import * as THREE from 'three';
-import { getLevel, LEVEL_COUNT } from '../../../shared/levels.ts';
+import { getLevel, getPack, levelCount } from '../../../shared/packs.ts';
 import { activeSide, currentCounts, generatorLabel, isCycle, undoIndexFor } from '../../../shared/logic.ts';
 import type { GameState, LevelDef, ServerMsg, Side } from '../../../shared/types.ts';
 import type { GameChannel } from '../net/client.ts';
@@ -17,6 +17,7 @@ import { buildGenerators, GeneratorStand, PEDESTAL_COLLIDER_RADIUS } from './gen
 import { Guides } from './guides.ts';
 import { IntroSequence } from './intro.ts';
 import { Player, RemotePlayer } from './player.ts';
+import { Terrain } from './platforms.ts';
 import { hasSeenMechanic } from '../mechanics.ts';
 import { Tutorial } from './tutorial.ts';
 import { Walkthrough } from './walkthrough.ts';
@@ -24,6 +25,9 @@ import { World } from './world.ts';
 import type { Atmosphere } from './world.ts';
 
 const INTERACT_RANGE = 8;
+
+/** Default spawn (classic levels); Skyway levels override it via `terrain.spawn`. */
+const DEFAULT_SPAWN = { x: 0, z: 22 };
 
 type LevelBuildState = { presses: Record<string, number>; history: string[]; phase: number };
 
@@ -34,6 +38,9 @@ export class GameController {
   private player: Player;
   private remote: RemotePlayer | null = null;
   private field: CrystalField | null = null;
+  private terrain: Terrain | null = null;
+  /** Whether the level just left had platforms (drives the respawn on load). */
+  private wasPlatformer = false;
   private stands: GeneratorStand[] = [];
   private levelGroup = new THREE.Group();
   private hud: Hud;
@@ -71,6 +78,7 @@ export class GameController {
   constructor(
     private channel: GameChannel,
     private onQuit: () => void,
+    private packId: string,
     startLevel = 1,
     private onLevelComplete?: (levelIndex: number) => void,
     introPack?: string
@@ -95,7 +103,12 @@ export class GameController {
     if (channel.role === 'day' || channel.role === 'night') {
       this.remote = new RemotePlayer(channel.role === 'day' ? 'night' : 'day', this.world.heightAt);
       this.world.scene.add(this.remote.mesh);
-      this.poseTimer = window.setInterval(() => this.channel.send({ t: 'pose', pose: this.player.getPose() }), 100);
+      this.poseTimer = window.setInterval(() => {
+        this.channel.send({ t: 'pose', pose: this.player.getPose() });
+        // Crates ride the same tick, but only when one has actually moved.
+        const boxes = this.terrain?.takeMoved();
+        if (boxes) this.channel.send({ t: 'boxes', boxes });
+      }, 100);
     }
 
     this.tutorial = new Tutorial(channel.role);
@@ -215,6 +228,11 @@ export class GameController {
     if (this.stands.length > 0) {
       this.busy = true;
       this.player.setColliders([]);
+      // Old geometry goes with the old generators, so nothing from the previous
+      // level is left standing while the next one rises.
+      this.player.setTerrain(null);
+      this.terrain?.dispose();
+      this.terrain = null;
       this.pendingLevel = { index, state };
       const old = this.stands;
       this.stands = [];
@@ -240,7 +258,7 @@ export class GameController {
   }
 
   private buildLevel(index: number, state: LevelBuildState, animateAtmo = false): void {
-    this.level = getLevel(index);
+    this.level = getLevel(this.packId, index);
     this.lastPresses = { ...state.presses };
     this.phase = state.phase;
     this.busy = false;
@@ -255,15 +273,38 @@ export class GameController {
     this.field = new CrystalField(this.level, this.world.heightAt);
     this.field.setAtmosphere(mode, animateAtmo);
     this.levelGroup.add(this.field.group);
+
+    // Platforms and crates go up before the generators do, so a stand that
+    // stands on one has its ground already there to rise out of.
+    this.terrain = new Terrain(this.level.terrain, this.world.heightAt);
+    this.levelGroup.add(this.terrain.group);
+    this.player.setTerrain(this.terrain.hasTerrain ? this.terrain : null);
+    // Classic levels share one open field, so the player keeps walking from
+    // where they were. Platformer levels have hand-built geometry that the old
+    // position could be standing inside, so those (and the level after one) put
+    // the player back on the start mark.
+    if (this.terrain.hasTerrain || this.wasPlatformer) {
+      const spawn = this.level.terrain?.spawn ?? DEFAULT_SPAWN;
+      const lane = this.channel.role === 'night' ? 3 : -3;
+      this.player.placeAt(spawn.x + lane, spawn.z);
+    }
+    this.wasPlatformer = this.terrain.hasTerrain;
+
     this.stands = buildGenerators(this.level, this.world.heightAt);
     this.stands.forEach((stand, i) => {
       this.levelGroup.add(stand.root);
       stand.riseIn(i * 0.08); // rise out of the ground, cage/sign appearing after
     });
     this.refreshActiveStands();
-    // Collisions turn on with the pedestals; crystals stay pass-through.
+    // Collisions turn on with the pedestals; crystals stay pass-through. The
+    // `y` keeps a stand up on a platform from walling off the ground beneath it.
     this.player.setColliders(
-      this.stands.map((s) => ({ x: s.root.position.x, z: s.root.position.z, radius: PEDESTAL_COLLIDER_RADIUS }))
+      this.stands.map((s) => ({
+        x: s.root.position.x,
+        z: s.root.position.z,
+        y: s.root.position.y,
+        radius: PEDESTAL_COLLIDER_RADIUS,
+      }))
     );
 
     this.hud.setLevel(this.level);
@@ -286,6 +327,8 @@ export class GameController {
     // generic press/balance coach marks are suppressed to avoid double cues.
     if (!this.level.tutorial && this.stands.some((s) => this.canPress(s))) this.guides.unlock('press');
     this.tutorial.onLevelWithGenerators();
+    if ((this.level.terrain?.platforms.length ?? 0) > 0) this.tutorial.onFirstPlatforms();
+    if ((this.level.terrain?.boxes.length ?? 0) > 0) this.tutorial.onFirstCrate();
     if (this.level.generators.some((g) => g.outputs.length > 1 || g.outputs[0].count > 1)) {
       this.tutorial.onFirstMultiOutput();
     }
@@ -294,6 +337,7 @@ export class GameController {
   /** Build a full GameState from the pieces the controller tracks. */
   private makeState(presses: Record<string, number>, history: string[]): GameState {
     return {
+      packId: this.packId,
       levelIndex: this.level?.index ?? 1,
       presses,
       history,
@@ -361,6 +405,10 @@ export class GameController {
 
     const balanced = Object.values(counts).every((c) => c.day === c.night);
     if (balanced && !state.solved) this.tutorial.onFirstBalanceReady();
+
+    // Reset puts the crates back on their marks too — otherwise "start over"
+    // would leave the level's climbing route already solved.
+    if (wasReset) this.terrain?.restore();
 
     if (wasReset && this.iResetLast) {
       this.iResetLast = false;
@@ -610,6 +658,9 @@ export class GameController {
       case 'pose':
         this.remote?.applyPose(msg.pose);
         break;
+      case 'boxes':
+        this.terrain?.applyRemote(msg.boxes);
+        break;
       case 'peer-left':
         showDialog({
           message: 'The other player left the game.',
@@ -625,12 +676,12 @@ export class GameController {
   }
 
   private showWinDialog(level: LevelDef): void {
-    const last = level.index >= LEVEL_COUNT;
+    const last = level.index >= levelCount(this.packId);
     this.closeDialog?.();
     this.closeDialog = showDialog({
       title: last ? 'Pack Complete!' : 'You Win!',
       message: last
-        ? 'Perfect balance! You finished every level of the Starter pack. The sun and the stars thank you!'
+        ? `Perfect balance! You finished every level of the ${getPack(this.packId).name}. The sun and the stars thank you!`
         : `Level ${level.index} balanced perfectly!`,
       winStyle: true,
       buttons: last
@@ -662,6 +713,9 @@ export class GameController {
 
     const dt = Math.min(0.05, (now - this.lastTime) / 1000);
     this.lastTime = now;
+    // Crates settle before the player moves, so the surface under their feet is
+    // this frame's, not last frame's.
+    this.terrain?.update(dt);
     this.player.update(dt);
     this.remote?.update(dt);
     this.field?.update(dt);
@@ -730,6 +784,8 @@ export class GameController {
     if (document.pointerLockElement === this.renderer.domElement) document.exitPointerLock();
     this.crosshair.remove();
     this.renderer.domElement.style.cursor = '';
+    this.terrain?.dispose();
+    this.terrain = null;
     this.guides.dispose();
     this.walkthrough.dispose();
     this.player.dispose();

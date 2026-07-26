@@ -585,16 +585,5 @@ export const STARTER_LEVELS: LevelDef[] = [
   },
 ];
 
-export function getLevel(index: number): LevelDef {
-  const level = STARTER_LEVELS[index - 1];
-  if (!level) throw new Error(`No level ${index}`);
-  return level;
-}
-
-export const LEVEL_COUNT = STARTER_LEVELS.length;
-
-/** Pack id used to key unlock progress; free-form for future packs. */
-export const STARTER_PACK_ID = 'starter';
-
-/** Display name, shown under the title in the pack intro cutscene. */
-export const STARTER_PACK_NAME = 'Starter Pack';
+// Pack lookup (`getLevel`, `levelCount`, ids and display names) lives in
+// `shared/packs.ts`, which owns this pack and every other one.
