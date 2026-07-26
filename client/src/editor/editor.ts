@@ -21,6 +21,8 @@ import { surfaceUnder, validateLevel } from '../../../shared/validate.ts';
 import type {
   BoxDef,
   CrystalColor,
+  ExtendDirection,
+  ExtendingPlatformDef,
   GeneratorDef,
   LevelDef,
   PlatformDef,
@@ -30,17 +32,29 @@ import { button, clearUI, el, showDialog, uiRoot } from '../screens/ui.ts';
 import { solveLevel } from './solve.ts';
 
 const ALL_COLORS: CrystalColor[] = ['red', 'blue', 'green', 'yellow', 'purple'];
+const ALL_DIRECTIONS: ExtendDirection[] = ['+x', '-x', '+z', '-z', '+y', '-y'];
+
+/** How each direction reads in the plan view (+z runs DOWN the screen). */
+const DIRECTION_LABEL: Record<ExtendDirection, string> = {
+  '+x': '→ right',
+  '-x': '← left',
+  '+z': '↓ toward the start',
+  '-z': '↑ into the distance',
+  '+y': '▲ up',
+  '-y': '▼ down',
+};
 
 const STORAGE_KEY = 'night-and-day-editor';
 
 /** Pack id the play test registers under; overwritten on every test run. */
 const DRAFT_PACK_ID = 'draft';
 
-type Tool = 'select' | 'platform' | 'crate' | 'generator' | 'spawn' | 'erase';
+type Tool = 'select' | 'platform' | 'extender' | 'crate' | 'generator' | 'spawn' | 'erase';
 
 /** What the pointer currently has hold of. */
 type Selection =
   | { kind: 'platform'; id: string }
+  | { kind: 'extender'; id: string }
   | { kind: 'crate'; id: string }
   | { kind: 'generator'; id: string }
   | null;
@@ -70,6 +84,9 @@ let selection: Selection = null;
 /** Side and height used for the next thing placed. */
 let newSide: Side = 'day';
 let newHeight = 2;
+/** Direction and reach used for the next extending platform placed. */
+let newDir: ExtendDirection = '+x';
+let newLength = 6;
 let view: View = { ox: 0, oz: 14, scale: 13 };
 
 let root: HTMLElement;
@@ -99,8 +116,15 @@ function blankLevel(index: number): LevelDef {
     initial: { red: { day: 0, night: 2 } },
     generators: [],
     solution: {},
-    terrain: { spawn: { x: 0, z: 28 }, platforms: [], boxes: [] },
+    terrain: { spawn: { x: 0, z: 28 }, platforms: [], boxes: [], extenders: [] },
   };
+}
+
+/** The level's extending platforms, created on demand for older drafts. */
+function extendersOf(lv: LevelDef): ExtendingPlatformDef[] {
+  const terrain = lv.terrain!;
+  terrain.extenders ??= [];
+  return terrain.extenders;
 }
 
 // ---------- Entry point ----------
@@ -235,6 +259,7 @@ function drawCanvas(): void {
   const lv = level();
   // Lowest platforms first, so a tall one drawn over a short one reads as "on top".
   for (const p of [...(lv.terrain?.platforms ?? [])].sort((a, b) => a.y - b.y)) drawPlatform(ctx, p);
+  for (const e of lv.terrain?.extenders ?? []) drawExtender(ctx, e);
   for (const b of lv.terrain?.boxes ?? []) drawCrate(ctx, b);
   for (const g of lv.generators) drawGenerator(ctx, g);
   drawSpawn(ctx);
@@ -313,6 +338,62 @@ function drawPlatform(ctx: CanvasRenderingContext2D, p: PlatformDef): void {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(`▲ ${p.y}`, (a.x + b.x) / 2, (a.y + b.y) / 2);
+}
+
+/**
+ * The footprint the arm covers when fully out, or null for the two vertical
+ * directions — those grow toward or away from the viewer, so from straight above
+ * there is nothing extra to draw.
+ */
+function armFootprint(e: ExtendingPlatformDef): { x0: number; z0: number; x1: number; z1: number } | null {
+  const hw = e.w / 2;
+  const hd = e.d / 2;
+  switch (e.dir) {
+    case '+x':
+      return { x0: e.x + hw, z0: e.z - hd, x1: e.x + hw + e.length, z1: e.z + hd };
+    case '-x':
+      return { x0: e.x - hw - e.length, z0: e.z - hd, x1: e.x - hw, z1: e.z + hd };
+    case '+z':
+      return { x0: e.x - hw, z0: e.z + hd, x1: e.x + hw, z1: e.z + hd + e.length };
+    case '-z':
+      return { x0: e.x - hw, z0: e.z - hd - e.length, x1: e.x + hw, z1: e.z - hd };
+    default:
+      return null;
+  }
+}
+
+function drawExtender(ctx: CanvasRenderingContext2D, e: ExtendingPlatformDef): void {
+  // The arm first, dashed: it is where the platform WILL be, not where it is.
+  const arm = armFootprint(e);
+  if (arm) {
+    const a = toScreen(arm.x0, arm.z0);
+    const b = toScreen(arm.x1, arm.z1);
+    ctx.fillStyle = 'rgba(240,244,255,0.18)';
+    ctx.fillRect(a.x, a.y, b.x - a.x, b.y - a.y);
+    ctx.strokeStyle = 'rgba(240,244,255,0.7)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 4]);
+    ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
+    ctx.setLineDash([]);
+  }
+
+  const a = toScreen(e.x - e.w / 2, e.z - e.d / 2);
+  const b = toScreen(e.x + e.w / 2, e.z + e.d / 2);
+  ctx.fillStyle = '#eef1ff';
+  ctx.fillRect(a.x, a.y, b.x - a.x, b.y - a.y);
+  strokeSelectable(ctx, a, b, selection?.kind === 'extender' && selection.id === e.id);
+
+  const cx = (a.x + b.x) / 2;
+  const cy = (a.y + b.y) / 2;
+  ctx.fillStyle = 'rgba(20,12,30,0.85)';
+  ctx.font = 'bold 12px Trebuchet MS';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(`${DIRECTION_LABEL[e.dir].charAt(0)} ${e.y}`, cx, cy);
+  // The condition, in the same words the mini crystals say it in game.
+  ctx.fillStyle = COLOR_HEX[e.when.color].ui;
+  ctx.font = 'bold 11px Trebuchet MS';
+  ctx.fillText(`${e.when.side === 'day' ? '☀' : '🌙'} ${e.when.count} ${e.when.color}`, cx, b.y + 10);
 }
 
 function drawCrate(ctx: CanvasRenderingContext2D, box: BoxDef): void {
@@ -404,6 +485,8 @@ function strokeSelectable(
 
 interface DrawPlatformDrag {
   kind: 'draw-platform';
+  /** Both are drawn by dragging a rectangle; this says which one lands. */
+  extender: boolean;
   x0: number;
   z0: number;
   x1: number;
@@ -437,7 +520,15 @@ function onCanvasDown(e: MouseEvent): void {
 
   switch (tool) {
     case 'platform':
-      drag = { kind: 'draw-platform', x0: snap(w.x), z0: snap(w.z), x1: snap(w.x), z1: snap(w.z) };
+    case 'extender':
+      drag = {
+        kind: 'draw-platform',
+        extender: tool === 'extender',
+        x0: snap(w.x),
+        z0: snap(w.z),
+        x1: snap(w.x),
+        z1: snap(w.z),
+      };
       break;
     case 'crate':
       addCrate(snap(w.x), snap(w.z));
@@ -497,8 +588,11 @@ function onCanvasUp(): void {
   if (drag?.kind === 'draw-platform') {
     const w = Math.abs(drag.x1 - drag.x0);
     const d = Math.abs(drag.z1 - drag.z0);
+    const cx = (drag.x0 + drag.x1) / 2;
+    const cz = (drag.z0 + drag.z1) / 2;
     // A click without a drag still makes a usable platform.
-    addPlatform((drag.x0 + drag.x1) / 2, (drag.z0 + drag.z1) / 2, Math.max(2, w), Math.max(2, d));
+    if (drag.extender) addExtender(cx, cz, Math.max(2, w), Math.max(2, d));
+    else addPlatform(cx, cz, Math.max(2, w), Math.max(2, d));
   } else if (drag?.kind === 'move') {
     buildPanel();
   }
@@ -535,6 +629,11 @@ function hitTest(x: number, z: number): Selection {
   for (const b of [...(lv.terrain?.boxes ?? [])].reverse()) {
     if (Math.abs(x - b.x) <= BOX_SIZE / 2 && Math.abs(z - b.z) <= BOX_SIZE / 2) return { kind: 'crate', id: b.id };
   }
+  // Extending platforms float, so they sit above any stone they overlap. Only
+  // the slab is grabbable — the arm is drawn where it will be, not where it is.
+  for (const e of [...(lv.terrain?.extenders ?? [])].reverse()) {
+    if (Math.abs(x - e.x) <= e.w / 2 && Math.abs(z - e.z) <= e.d / 2) return { kind: 'extender', id: e.id };
+  }
   // Highest platform wins, matching what you'd be standing on.
   const platforms = [...(lv.terrain?.platforms ?? [])].sort((a, b) => b.y - a.y);
   for (const p of platforms) {
@@ -548,6 +647,10 @@ function positionOf(sel: NonNullable<Selection>): { x: number; z: number } {
   if (sel.kind === 'platform') {
     const p = lv.terrain!.platforms.find((q) => q.id === sel.id)!;
     return { x: p.x, z: p.z };
+  }
+  if (sel.kind === 'extender') {
+    const e = extendersOf(lv).find((q) => q.id === sel.id)!;
+    return { x: e.x, z: e.z };
   }
   if (sel.kind === 'crate') {
     const b = lv.terrain!.boxes.find((q) => q.id === sel.id)!;
@@ -563,6 +666,10 @@ function setPosition(sel: NonNullable<Selection>, x: number, z: number): void {
     const p = lv.terrain!.platforms.find((q) => q.id === sel.id)!;
     p.x = x;
     p.z = z;
+  } else if (sel.kind === 'extender') {
+    const e = extendersOf(lv).find((q) => q.id === sel.id)!;
+    e.x = x;
+    e.z = z;
   } else if (sel.kind === 'crate') {
     const b = lv.terrain!.boxes.find((q) => q.id === sel.id)!;
     b.x = x;
@@ -583,7 +690,11 @@ function nextId(prefix: string, taken: Iterable<string>): string {
 
 function terrainIds(): string[] {
   const t = level().terrain!;
-  return [...t.platforms.map((p) => p.id), ...t.boxes.map((b) => b.id)];
+  return [
+    ...t.platforms.map((p) => p.id),
+    ...t.boxes.map((b) => b.id),
+    ...extendersOf(level()).map((e) => e.id),
+  ];
 }
 
 function addPlatform(x: number, z: number, w: number, d: number): void {
@@ -598,6 +709,31 @@ function addPlatform(x: number, z: number, w: number, d: number): void {
   level().terrain!.platforms.push(p);
   selection = { kind: 'platform', id: p.id };
   changed();
+}
+
+function addExtender(x: number, z: number, w: number, d: number): void {
+  const lv = level();
+  const e: ExtendingPlatformDef = {
+    id: nextId('e', terrainIds()),
+    x: snap(x),
+    z: snap(z),
+    w: snap(w),
+    d: snap(d),
+    y: newHeight,
+    dir: newDir,
+    length: newLength,
+    // Start from a count the level can actually reach, so a freshly placed
+    // platform is never born failing the "can this ever appear?" check.
+    when: { color: colorsOf(lv)[0] ?? 'red', side: 'day', count: startingCount(lv, colorsOf(lv)[0] ?? 'red', 'day') },
+  };
+  extendersOf(lv).push(e);
+  selection = { kind: 'extender', id: e.id };
+  changed();
+}
+
+/** What a color/side starts at — the lowest count an extender can ever wait for. */
+function startingCount(lv: LevelDef, color: CrystalColor, side: Side): number {
+  return lv.initial[color]?.[side] ?? 0;
 }
 
 function addCrate(x: number, z: number): void {
@@ -628,6 +764,8 @@ function deleteSelection(): void {
   const lv = level();
   if (selection.kind === 'platform') {
     lv.terrain!.platforms = lv.terrain!.platforms.filter((p) => p.id !== selection!.id);
+  } else if (selection.kind === 'extender') {
+    lv.terrain!.extenders = extendersOf(lv).filter((e) => e.id !== selection!.id);
   } else if (selection.kind === 'crate') {
     lv.terrain!.boxes = lv.terrain!.boxes.filter((b) => b.id !== selection!.id);
   } else {
@@ -763,6 +901,7 @@ function sectionTools(): HTMLElement {
   const tools: [Tool, string][] = [
     ['select', '↖ Select'],
     ['platform', '▭ Platform'],
+    ['extender', '⇥ Extender'],
     ['crate', '📦 Crate'],
     ['generator', '💎 Generator'],
     ['spawn', '⚑ Start'],
@@ -777,15 +916,27 @@ function sectionTools(): HTMLElement {
       }, tool === id ? 'editor-tool active' : 'editor-tool')
     );
   }
-  return section('Tools', [
-    buttons,
+  const options: HTMLElement[] = [
     labeled('New platform height', numInput(newHeight, (v) => { newHeight = Math.max(1, v); }, 1, 1)),
     labeled('New generator side', select<Side>(['day', 'night'], newSide, (v) => { newSide = v; })),
+  ];
+  if (tool === 'extender') {
+    options.push(
+      labeled('Extends', select(ALL_DIRECTIONS, newDir, (v) => { newDir = v; }, (v) => DIRECTION_LABEL[v])),
+      labeled('Reach', numInput(newLength, (v) => { newLength = Math.max(1, v); }, 1, 1))
+    );
+  }
+
+  return section('Tools', [
+    buttons,
+    ...options,
     el('div', {
       className: 'editor-note',
       text:
         tool === 'platform'
           ? 'Drag a rectangle to draw a platform at the height above.'
+          : tool === 'extender'
+            ? 'Drag a rectangle to draw a white platform. It floats there and reaches out only while its count matches — set the count below.'
           : tool === 'crate'
             ? 'Click to drop a crate. It lands on whatever is underneath.'
             : tool === 'generator'
@@ -880,6 +1031,37 @@ function sectionSelection(): HTMLElement {
       el('div', {
         className: 'editor-note',
         text: 'A jump clears about 2.4 units, so a step of 2 is reachable and 4 needs a crate.',
+      }),
+      button('Delete', deleteSelection, 'editor-btn danger'),
+    ]);
+  }
+
+  if (selection.kind === 'extender') {
+    const e = extendersOf(lv).find((q) => q.id === selection!.id);
+    if (!e) return section('Selected', []);
+    return section(`Extending platform ${e.id}`, [
+      row([
+        labeled('x', numInput(e.x, (v) => { e.x = v; changed(); })),
+        labeled('z', numInput(e.z, (v) => { e.z = v; changed(); })),
+      ]),
+      row([
+        labeled('width', numInput(e.w, (v) => { e.w = Math.max(1, v); changed(); }, 1, 1)),
+        labeled('depth', numInput(e.d, (v) => { e.d = Math.max(1, v); changed(); }, 1, 1)),
+      ]),
+      labeled('height', numInput(e.y, (v) => { e.y = Math.max(1, v); changed(); }, 1, 1)),
+      labeled('extends', select(ALL_DIRECTIONS, e.dir, (v) => { e.dir = v; changed(); }, (v) => DIRECTION_LABEL[v])),
+      labeled('reach', numInput(e.length, (v) => { e.length = Math.max(1, v); changed(); }, 1, 1)),
+      el('h4', { text: 'Reaches out while…' }),
+      row([
+        select(ALL_COLORS, e.when.color, (v) => { e.when.color = v; changed(); }),
+        select<Side>(['day', 'night'], e.when.side, (v) => { e.when.side = v; changed(); }),
+        numInput(e.when.count, (v) => { e.when.count = Math.max(0, Math.round(v)); changed(); }, 1, 0),
+      ]),
+      el('div', {
+        className: 'editor-note',
+        text:
+          `Out while ${e.when.side} has exactly ${e.when.count} ${e.when.color}. ` +
+          'Counts only grow, so aim for a number the generators can actually land on.',
       }),
       button('Delete', deleteSelection, 'editor-btn danger'),
     ]);
@@ -1084,8 +1266,9 @@ function importJson(text: string): void {
   }
   // Imported levels may predate the terrain field; give them somewhere to build.
   for (const lv of pack.levels) {
-    lv.terrain ??= { spawn: { x: 0, z: 28 }, platforms: [], boxes: [] };
+    lv.terrain ??= { spawn: { x: 0, z: 28 }, platforms: [], boxes: [], extenders: [] };
     lv.terrain.spawn ??= { x: 0, z: 28 };
+    lv.terrain.extenders ??= [];
   }
   pack.levels.forEach((lv, i) => (lv.index = i + 1));
   currentIndex = 0;

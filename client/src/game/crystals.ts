@@ -47,6 +47,10 @@ export interface SpawnPoint {
 /** How long a newly generated crystal shows its "just made" flourish. */
 const BURST_TIME = 1.6;
 
+/** A stack's layer: five crystals across, two rows deep, then it starts again on top. */
+const COLS_PER_ROW = 5;
+const ROWS_PER_LAYER = 2;
+
 /** Twinkling specks held inside each night crystal. */
 const STARS_PER_CRYSTAL = 4;
 /** Room for 64 night crystals' worth of specks before the buffer has to grow. */
@@ -342,16 +346,18 @@ export class CrystalField {
   }
 
   private slotFor(cluster: Cluster, index: number): THREE.Vector3 {
-    // Spiral-ish grid: 3 columns along x, rows along z, stacking upward later.
-    const perLayer = 9;
+    // Rows of five, two deep, stacking upward after that. Counting in fives is
+    // the layout the extending platforms' condition marks use too, so a stack of
+    // seven reads the same way in both places: a full row and two over.
+    const perLayer = COLS_PER_ROW * ROWS_PER_LAYER;
     const layer = Math.floor(index / perLayer);
     const k = index % perLayer;
-    const col = k % 3;
-    const row = Math.floor(k / 3);
+    const col = k % COLS_PER_ROW;
+    const row = Math.floor(k / COLS_PER_ROW);
     return new THREE.Vector3(
-      cluster.center.x + (col - 1) * 1.5,
+      cluster.center.x + (col - (COLS_PER_ROW - 1) / 2) * 1.5,
       cluster.center.y + 0.75 + layer * 1.3,
-      cluster.center.z + (row - 1) * 1.5
+      cluster.center.z + (row - (ROWS_PER_LAYER - 1) / 2) * 1.5
     );
   }
 

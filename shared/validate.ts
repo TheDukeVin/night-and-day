@@ -3,7 +3,9 @@
 
 import { currentCounts, isBalanced } from './logic.ts';
 import { BOX_SIZE } from './skyway.ts';
-import type { LevelDef, PlatformDef } from './types.ts';
+import type { ExtendDirection, LevelDef, PlatformDef } from './types.ts';
+
+const EXTEND_DIRECTIONS: ExtendDirection[] = ['+x', '-x', '+z', '-z', '+y', '-y'];
 
 export interface LevelReport {
   /** Must be empty for the level to ship. */
@@ -26,6 +28,10 @@ export function platformsUnder(level: LevelDef, x: number, z: number): PlatformD
  * The surface something dropped at (x, z) would come to rest on: the highest
  * platform or crate top covering that spot, or the ground (0). This is what the
  * editor uses to place a crate or generator on whatever is beneath the cursor.
+ *
+ * Extending platforms are deliberately not surfaces here: they come and go with
+ * the crystal counts, so anything authored to rest on one would be left floating
+ * the moment it retracts. Only players (and crates they shove) ride them.
  */
 export function surfaceUnder(level: LevelDef, x: number, z: number, ignoreId?: string): number {
   let best = 0;
@@ -81,6 +87,30 @@ function checkTerrain(level: LevelDef, errors: string[]): void {
     // A crate whose footprint is inside a platform's would be stuck forever.
     for (const p of platformsUnder(level, b.x, b.z)) {
       if (p.y > b.y + 1e-6) errors.push(`crate ${b.id} is buried inside platform ${p.id}`);
+    }
+  }
+
+  for (const e of terrain.extenders ?? []) {
+    if (ids.has(e.id)) errors.push(`duplicate terrain id ${e.id}`);
+    ids.add(e.id);
+    if (e.w <= 0 || e.d <= 0) errors.push(`extending platform ${e.id} has a non-positive size`);
+    if (e.y <= 0) errors.push(`extending platform ${e.id} must float above the ground (y > 0)`);
+    if (e.length <= 0) errors.push(`extending platform ${e.id} must reach somewhere (length > 0)`);
+    if (!EXTEND_DIRECTIONS.includes(e.dir)) {
+      errors.push(`extending platform ${e.id} has an unknown direction ${JSON.stringify(e.dir)}`);
+    }
+    if (e.when.count < 0) errors.push(`extending platform ${e.id} wants a negative crystal count`);
+    // Counts only ever grow from the level's starting layout, so a target below
+    // the starting count can never be hit and the platform would never appear.
+    const start = level.initial[e.when.color]?.[e.when.side] ?? 0;
+    const canGrow = level.generators.some(
+      (g) => g.side === e.when.side && g.outputs.some((o) => o.color === e.when.color)
+    );
+    if (e.when.count < start || (e.when.count > start && !canGrow)) {
+      errors.push(
+        `extending platform ${e.id} waits for ${e.when.side} ${e.when.color} = ${e.when.count}, ` +
+          `which this level can never reach (starts at ${start})`
+      );
     }
   }
 

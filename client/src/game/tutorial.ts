@@ -73,6 +73,14 @@ export class Tutorial {
     this.offer('push', 'Too high to jump? Walk into a stone crate to push it. Park one beside a platform and use it as a step!');
   }
 
+  /** First level with a white extending platform. */
+  onFirstExtender(): void {
+    this.offer(
+      'extend',
+      'White platforms reach out only when a count is EXACTLY right. The little crystals on top show which ones — get that many and watch it grow!'
+    );
+  }
+
   onFirstBalanceReady(): void {
     this.offer('balance', 'Think the sides match? Press the ⚖ Balance button to find out — matching crystals will cancel each other out.');
   }

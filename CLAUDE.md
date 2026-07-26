@@ -118,6 +118,21 @@ production the WebSocket is same-origin on :8787. Stop stray servers with
     2-player they are relayed to the peer like `pose` (the `boxes` message) by
     whoever pushed them, and `reset` restores them from the level def. `PlayerPose`
     gained `y` so a peer up on a platform is drawn at the right height.
+  - **Extending platforms** (`terrain.extenders`) are the one place the math
+    changes the *shape* of a level: a white slab that grows an arm `length` units
+    along one of six `dir`s while `when` (color + side + count) matches EXACTLY,
+    and retracts the moment it doesn't. Unlike stone they are thin slabs you can
+    walk under, and horizontal arms are bridges while `+y`/`-y` grow pillars.
+    State is **derived** — `Terrain.setCounts(counts)` from `applyState` — so
+    there is nothing to network and both players always see the same bridge; the
+    growth rate is well under `STEP_UP` per frame, so a rising pillar carries
+    whoever stands on it. `validateLevel` rejects a condition the level can never
+    reach (counts only grow from `initial`), and `surfaceUnder` deliberately
+    excludes them so nothing is ever authored resting on one. Visually: white,
+    with a direction arrow and one mini crystal per crystal the condition wants,
+    **laid out in rows of five** — the same five-across layout the crystal stacks
+    use (`COLS_PER_ROW`/`ROWS_PER_LAYER`, 5×2 per layer). The `extend` text tip
+    introduces the mechanic.
 - Client screens are plain DOM overlays (`client/src/screens/`, styled by
   `client/src/style.css`); the 3D scene lives in `client/src/game/`. Two extra
   pages hang off a path check in `main.ts` (no separate HTML entry — Vite and the
@@ -179,7 +194,8 @@ production the WebSocket is same-origin on :8787. Stop stray servers with
 
 `client/src/editor/` — a top-down plan view (+x right, +z **down** the screen, so
 the bottom of the map is where players spawn) for building platformer levels:
-draw platforms, drop crates, place generators, edit the level's math, then
+draw platforms and extending platforms, drop crates, place generators, edit the
+level's math, then
 **Play test** (registers a `draft` pack and boots the real `GameController`),
 **Check** (runs `validateLevel`), or **Download** the level or pack as JSON in the
 exact `LevelDef` shape `shared/skyway.ts` holds. Work autosaves to localStorage.
@@ -187,7 +203,10 @@ exact `LevelDef` shape `shared/skyway.ts` holds. Work autosaves to localStorage.
 Two invariants worth keeping:
 - Every mutation runs `resettle()`, which drops each crate and generator onto the
   surface beneath it. A floating generator is a level the verifier rejects, so the
-  editor simply never lets that state exist.
+  editor simply never lets that state exist. Extending platforms are exempt in
+  both directions: they float where you put them, and nothing settles onto one.
+- The extender tool draws like the platform tool (drag a rectangle); its arm is
+  drawn dashed in the plan view — where the platform *will* be, not where it is.
 - `solve.ts` searches the **day−night difference** space, not press counts: one
   press is a fixed vector on that difference, so a BFS finds the minimum-press
   solution directly.
