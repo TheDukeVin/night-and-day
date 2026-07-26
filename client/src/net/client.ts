@@ -10,6 +10,12 @@ export interface GameChannel {
   onMessage: (msg: ServerMsg) => void;
   close(): void;
   /**
+   * Advance the authoritative simulation by `dt`, for a channel that hosts the
+   * session in this tab. The networked channel leaves it out: there the server
+   * runs the clock, and its updates arrive as messages like any other.
+   */
+  tick?(dt: number): void;
+  /**
    * Hot seat only: hand the keyboard to the other player and return the role
    * that now holds it. Present on a channel where one person plays both sides
    * (the editor's two-player play test) and absent everywhere else, which is how
@@ -22,7 +28,7 @@ export interface GameChannel {
 export class LoopbackChannel implements GameChannel {
   role: PlayerRole = 'dusk';
   onMessage: (msg: ServerMsg) => void = () => {};
-  private session = new GameSession();
+  protected session = new GameSession();
 
   constructor(packId: string, startLevel = 1) {
     this.session.startLevel(packId, startLevel);
@@ -34,6 +40,14 @@ export class LoopbackChannel implements GameChannel {
     queueMicrotask(() => {
       for (const reply of replies) this.onMessage(reply);
     });
+  }
+
+  /**
+   * Single player still runs the real session — crates and arms included — so
+   * the render loop drives its clock here exactly as the server does for a room.
+   */
+  tick(dt: number): void {
+    for (const reply of this.session.tick(dt)) this.onMessage(reply);
   }
 
   close(): void {}

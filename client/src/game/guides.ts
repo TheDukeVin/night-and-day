@@ -1,6 +1,6 @@
 // Visual first-time guides: one animated coach mark at a time, each waiting for
 // the player to actually perform the action before the next one appears. Nearly
-// wordless — keycaps, a mouse glyph, a pointing hand — so young players can read
+// wordless — keycaps, a mouse glyph, an arrow — so young players can read
 // them at a glance. Each cue shows only on a player's FIRST encounter with that
 // mechanic: the seen-set is tied to the account (server-backed via mechanics.ts)
 // for signed-in players and kept in memory per session for guests. Ids are
@@ -10,16 +10,16 @@ import { el } from '../screens/ui.ts';
 import { getSettings } from '../settings.ts';
 import { hasSeenMechanic, markMechanicSeen } from '../mechanics.ts';
 
-export type GuideId = 'move' | 'look' | 'press' | 'balance';
+export type GuideId = 'move' | 'look' | 'balance';
 
 /** Shown in this order; a guide waits for every earlier one to be finished. */
-const ORDER: GuideId[] = ['move', 'look', 'press', 'balance'];
+const ORDER: GuideId[] = ['move', 'look', 'balance'];
 
 const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space'];
 const LOOK_TURN = 1.2; // radians of camera turn that counts as "you've got it"
 
 // The control guides ask for every key, which a player may never finish — let
-// them expire so the guides behind them (press, balance) still get their turn.
+// them expire so the guides behind them (balance) still get their turn.
 const CONTROL_TIMEOUT = 30_000;
 
 /** Live read of what the player has done, supplied by the controller. */
@@ -27,16 +27,11 @@ export interface GuideWatch {
   usedKeys: ReadonlySet<string>;
   heldKeys: ReadonlySet<string>;
   turned: number; // total camera yaw+pitch travel, radians
-  presses: number;
   balances: number;
 }
 
 export interface GuideOptions {
   watch: () => GuideWatch;
-  /** Screen position of the generator the press guide should point at. */
-  pressAnchor: () => { x: number; y: number } | null;
-  /** Glyph over that generator: a pointing hand to click, footprints to step in. */
-  pressGlyph: () => string;
   /** The Balance button, so its guide can sit right above it. */
   balanceButton: HTMLElement;
 }
@@ -120,8 +115,6 @@ export class Guides {
         return MOVE_KEYS.every((k) => w.usedKeys.has(k));
       case 'look':
         return w.turned >= LOOK_TURN;
-      case 'press':
-        return w.presses > 0;
       case 'balance':
         return w.balances > 0;
     }
@@ -150,7 +143,6 @@ export class Guides {
     const card = el('div', { className: `guide-card guide-${id}` });
     if (id === 'move') card.append(this.buildKeycaps());
     else if (id === 'look') card.append(buildMouse());
-    else if (id === 'press') card.append(el('div', { className: 'guide-ring' }), el('div', { className: 'guide-hand', text: this.opts.pressGlyph() }));
     else card.append(el('div', { className: 'guide-arrow', text: '▼' }));
     this.root.append(card);
     return card;
@@ -181,10 +173,6 @@ export class Guides {
       }
     } else if (id === 'look') {
       card.classList.toggle('locking', getSettings().cameraMode === 'pointerlock');
-    } else if (id === 'press') {
-      const at = this.opts.pressAnchor();
-      card.classList.toggle('hidden', at === null);
-      if (at) place(card, at.x, at.y);
     } else if (id === 'balance') {
       const r = this.opts.balanceButton.getBoundingClientRect();
       this.opts.balanceButton.classList.add('guide-lit');

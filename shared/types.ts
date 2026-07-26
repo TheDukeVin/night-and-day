@@ -1,5 +1,7 @@
 // Shared types between client and server.
 
+import type { CratePush, TerrainSnapshot } from './terrain.ts';
+
 export type CrystalColor = 'red' | 'blue' | 'green' | 'yellow' | 'purple';
 export type Side = 'day' | 'night';
 
@@ -138,6 +140,14 @@ export interface GameState {
   resets: number; // resets since last hint was taken (drives answer offer)
   hintTaken: boolean;
   solved: boolean;
+  /**
+   * Where the crates are and how far the arms have grown. Platformer levels only
+   * (null everywhere else). Crates are NOT scenery: which side of a gap a crate
+   * ended up on decides whether a generator can be reached at all, so the
+   * session owns them exactly the way it owns the press counts. Clients predict
+   * this between updates and correct to whatever arrives.
+   */
+  terrain: TerrainSnapshot | null;
 }
 
 export interface CrystalCounts {
@@ -179,10 +189,10 @@ export type ClientMsg =
   | { t: 'answer' }
   | { t: 'next' } // advance after a win
   | { t: 'pose'; pose: PlayerPose }
-  // Crate positions, relayed to the peer like `pose`. Crates are traversal-only
-  // scenery — they never affect the balance math — so they are not part of the
-  // authoritative GameState; the client doing the pushing owns them.
-  | { t: 'boxes'; boxes: BoxDef[] }
+  // "I walked into this crate and it moved this far." The session re-runs the
+  // same collision test from its own crate positions before accepting it, so a
+  // client's prediction can never push a crate somewhere it does not fit.
+  | { t: 'push'; pushes: CratePush[] }
   | { t: 'unlocked'; levels: number[] }; // share this client's unlocked levels with the peer
 
 /** Server -> client */
@@ -198,6 +208,8 @@ export type ServerMsg =
   | { t: 'answer'; solution: Record<string, number> }
   | { t: 'offer-answer' }
   | { t: 'pose'; pose: PlayerPose }
-  | { t: 'boxes'; boxes: BoxDef[] }
+  // The authoritative terrain, streamed while anything is moving (and on a slow
+  // heartbeat when nothing is), so no disagreement can outlive a second.
+  | { t: 'terrain'; terrain: TerrainSnapshot }
   | { t: 'unlocked'; levels: number[] }
   | { t: 'error'; message: string };

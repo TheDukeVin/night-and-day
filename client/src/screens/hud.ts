@@ -1,5 +1,10 @@
 // In-game HUD: level name, per-color day/night counts, the primary
 // Balance/Pass button, Undo and Reset, plus a role/turn badge.
+//
+// Platformer levels run in "auto-balance" mode (`setAutoBalance`): the sides are
+// weighed the moment they match, so the Balance button has nothing to do and
+// Undo is meaningless once reaching a generator is part of the puzzle. Both are
+// hidden there; a Pass button (cycle levels) still appears if one is needed.
 
 import type { CrystalColor, CrystalCounts, GameState, LevelDef, PlayerRole, Side } from '../../../shared/types.ts';
 import { activeSide, canPass, isCycle } from '../../../shared/logic.ts';
@@ -35,6 +40,8 @@ export class Hud {
   private primaryIsPass = false;
   /** Whether the primary button is disabled because it is the other side's turn. */
   private waiting = false;
+  /** Platformer levels: balancing happens by itself, so Balance/Undo are hidden. */
+  private autoBalance = false;
 
   constructor(
     private role: PlayerRole,
@@ -86,6 +93,7 @@ export class Hud {
       btn.classList.remove('pass-btn');
       this.roleLabel.textContent = ROLE_LABEL[this.role];
       this.setBusy(this.busy);
+      this.applyVisibility();
       return;
     }
     const active = activeSide(level, state)!;
@@ -103,6 +111,7 @@ export class Hud {
       btn.textContent = `${SIDE_ICON[active]} ${cap(active)} is playing…`;
       btn.classList.remove('pass-btn');
       btn.disabled = true;
+      this.applyVisibility();
       return;
     }
     this.waiting = false;
@@ -117,6 +126,23 @@ export class Hud {
       btn.classList.remove('pass-btn');
     }
     this.setBusy(this.busy);
+    this.applyVisibility();
+  }
+
+  /**
+   * Auto-balance levels (the platformer ones) drop Balance and Undo entirely:
+   * the sides are weighed as soon as they match, and taking a press back has no
+   * meaning when reaching a generator is half the puzzle. A Pass button is still
+   * shown, since handing off is a real choice the player still has to make.
+   */
+  setAutoBalance(on: boolean): void {
+    this.autoBalance = on;
+    this.applyVisibility();
+  }
+
+  private applyVisibility(): void {
+    this.undoButton.style.display = this.autoBalance ? 'none' : '';
+    this.balanceButton.style.display = this.autoBalance && !this.primaryIsPass ? 'none' : '';
   }
 
   /** Hot seat: the keyboard changed hands. Callers re-run `setTurn` after this. */

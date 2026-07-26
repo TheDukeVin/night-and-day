@@ -30,7 +30,16 @@ interface Room {
   session: GameSession;
   players: Map<WebSocket, PlayerRole>;
   started: boolean;
+  /** Fixed-step driver for the room's terrain, running while the game is on. */
+  ticker?: ReturnType<typeof setInterval>;
 }
+
+/**
+ * How often a started room advances its terrain. Crates and extending arms are
+ * game state the server owns, so this is the clock that decides where they are;
+ * clients predict between ticks and correct to what it sends.
+ */
+const TICK_MS = 33;
 
 const rooms = new Map<string, Room>();
 
@@ -114,6 +123,20 @@ function broadcast(room: Room, msg: ServerMsg, except?: WebSocket): void {
   }
 }
 
+/** Start (or restart) a room's terrain clock; idempotent. */
+function startTicking(room: Room): void {
+  stopTicking(room);
+  room.ticker = setInterval(() => {
+    for (const reply of room.session.tick(TICK_MS / 1000)) broadcast(room, reply);
+  }, TICK_MS);
+}
+
+function stopTicking(room: Room): void {
+  if (room.ticker === undefined) return;
+  clearInterval(room.ticker);
+  room.ticker = undefined;
+}
+
 wss.on('connection', (ws) => {
   let room: Room | null = null;
   let role: PlayerRole = 'day';
@@ -154,6 +177,7 @@ wss.on('connection', (ws) => {
         if (!room || room.players.size < 2 || role !== 'day') return;
         room.session.startLevel(msg.pack, msg.level);
         room.started = true;
+        startTicking(room);
         broadcast(room, {
           t: 'begin',
           pack: room.session.state.packId,
@@ -164,13 +188,12 @@ wss.on('connection', (ws) => {
         break;
       }
       case 'pose': {
-        if (room) broadcast(room, { t: 'pose', pose: msg.pose }, ws);
-        break;
-      }
-      // Crates are traversal scenery, not game state (they never change the
-      // balance math), so — like `pose` — they are simply relayed to the peer.
-      case 'boxes': {
-        if (room) broadcast(room, { t: 'boxes', boxes: msg.boxes }, ws);
+        if (!room) break;
+        // The pose is both scenery (the peer draws the other character) and
+        // input: it is how the session knows where a body is standing, which is
+        // what stops a growing platform from squeezing someone.
+        room.session.setPose(role, msg.pose);
+        broadcast(room, { t: 'pose', pose: msg.pose }, ws);
         break;
       }
       case 'unlocked': {
@@ -192,8 +215,14 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     if (!room) return;
     room.players.delete(ws);
+    // A player who left is no longer standing anywhere — otherwise their ghost
+    // would hold an extending platform still forever.
+    room.session.clearPose(role);
     broadcast(room, { t: 'peer-left' });
-    if (room.players.size === 0) rooms.delete(room.name);
+    if (room.players.size === 0) {
+      stopTicking(room);
+      rooms.delete(room.name);
+    }
     room = null;
   });
 });

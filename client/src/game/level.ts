@@ -2,9 +2,12 @@
 // levels, routes input to the game channel and reacts to authoritative state.
 
 import * as THREE from 'three';
+import { WORLD_SEED } from '../../../shared/ground.ts';
 import { getLevel, getPack, levelCount } from '../../../shared/packs.ts';
-import { activeSide, currentCounts, generatorLabel, isCycle, undoIndexFor } from '../../../shared/logic.ts';
-import type { GameState, LevelDef, ServerMsg, Side } from '../../../shared/types.ts';
+import { activeSide, canPass, currentCounts, generatorLabel, isCycle, undoIndexFor } from '../../../shared/logic.ts';
+import type { TerrainSnapshot } from '../../../shared/terrain.ts';
+import { ACTOR_HEIGHT, PLAYER_RADIUS } from '../../../shared/terrain.ts';
+import type { GameState, LevelDef, PlayerPose, ServerMsg, Side } from '../../../shared/types.ts';
 import type { GameChannel } from '../net/client.ts';
 import { getSettings, pixelRatioFor } from '../settings.ts';
 import { Hud } from '../screens/hud.ts';
@@ -30,13 +33,33 @@ const INTERACT_RANGE = 8;
 const STEP_PAD_RADIUS = RING_RADIUS + 0.5;
 /** Leaving takes a little more, so hugging the edge doesn't fire repeatedly. */
 const STEP_PAD_RELEASE = STEP_PAD_RADIUS + 0.5;
-/** How far above/below a stand's base the pad still counts (mirrors the collider band). */
-const STEP_PAD_BAND = 2.5;
+/**
+ * How far above/below a stand's base your feet may be and still be *on* the pad.
+ * Deliberately tight: the pad is the ring on the ground, so jumping lifts you off
+ * it (the jump apex is ~2.4, far above this) and landing back inside counts as a
+ * fresh entry — which is how a stand is pressed twice in the same spot. The
+ * slightly larger release keeps uneven ground from flickering the pad off.
+ */
+const STEP_PAD_BAND = 0.4;
+const STEP_PAD_BAND_RELEASE = 0.7;
+
+/**
+ * How often this client reports its body and its crate pushes to the session.
+ * Fast enough that a crate follows your hands and a growing arm knows where you
+ * are standing; slow enough to be nothing on the wire.
+ */
+const REPORT_MS = 50;
 
 /** Default spawn (classic levels); Skyway levels override it via `terrain.spawn`. */
 const DEFAULT_SPAWN = { x: 0, z: 22 };
 
-type LevelBuildState = { presses: Record<string, number>; history: string[]; phase: number };
+type LevelBuildState = {
+  presses: Record<string, number>;
+  history: string[];
+  phase: number;
+  /** The session's crates and arms, so a level never builds with stale ones. */
+  terrain: TerrainSnapshot | null;
+};
 
 export class GameController {
   private renderer: THREE.WebGLRenderer;
@@ -53,6 +76,15 @@ export class GameController {
    * player walks into the glow ring at its base.
    */
   private stepPads = false;
+  /**
+   * Platformer levels also balance themselves: the moment the sides match the
+   * ceremony fires on its own, so there is no Balance button (and no Undo —
+   * taking a press back is not well defined once *reaching* a generator, and the
+   * order you reach them in, is part of the puzzle).
+   */
+  private autoBalance = false;
+  /** Guards against firing the automatic balance twice for one match. */
+  private autoBalanceSent = false;
   /** Generator ids the player is currently standing in the ring of. */
   private onPad = new Set<string>();
   private stands: GeneratorStand[] = [];
@@ -61,7 +93,6 @@ export class GameController {
   private tutorial: Tutorial;
   private guides: Guides;
   private walkthrough: Walkthrough;
-  private myPresses = 0;
   private myBalances = 0;
   private level: LevelDef | null = null;
   /** Current cycle phase (0 for Sunset levels); drives the active side. */
@@ -111,7 +142,7 @@ export class GameController {
     this.camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 2000);
     this.camera.position.set(0, 8, 36);
 
-    this.world = new World(20260719);
+    this.world = new World(WORLD_SEED);
     this.world.scene.add(this.levelGroup);
 
     this.player = new Player(channel.role, this.camera, this.world.heightAt, canvas);
@@ -120,13 +151,17 @@ export class GameController {
     if (channel.role === 'day' || channel.role === 'night') {
       this.remote = new RemotePlayer(channel.role === 'day' ? 'night' : 'day', this.world.heightAt);
       this.world.scene.add(this.remote.mesh);
-      this.poseTimer = window.setInterval(() => {
-        this.channel.send({ t: 'pose', pose: this.player.getPose() });
-        // Crates ride the same tick, but only when one has actually moved.
-        const boxes = this.terrain?.takeMoved();
-        if (boxes) this.channel.send({ t: 'boxes', boxes });
-      }, 100);
     }
+    // Every mode reports upstream, not just the networked one: the pose is how
+    // the session knows where a body is standing (so an arm doesn't grow through
+    // it), and a push is this client asking for a crate to move. In single
+    // player the session is the loopback channel's own, so this is a call, not a
+    // packet.
+    this.poseTimer = window.setInterval(() => {
+      this.channel.send({ t: 'pose', pose: this.player.getPose() });
+      const pushes = this.terrain?.takePushes();
+      if (pushes) this.channel.send({ t: 'push', pushes });
+    }, REPORT_MS);
 
     this.tutorial = new Tutorial(channel.role);
     this.hud = new Hud(
@@ -144,11 +179,8 @@ export class GameController {
         usedKeys: this.player.usedKeys,
         heldKeys: this.player.heldKeys,
         turned: this.player.turned,
-        presses: this.myPresses,
         balances: this.myBalances,
       }),
-      pressAnchor: () => this.pressAnchor(),
-      pressGlyph: () => (this.stepPads ? '👣' : '👆'),
       balanceButton: this.hud.balanceButton,
     });
     uiRoot().append(this.guides.root);
@@ -187,7 +219,7 @@ export class GameController {
     if (introPack !== undefined) this.startIntro(introPack);
 
     this.tutorial.onGameStart();
-    this.loadLevel(startLevel, { presses: {}, history: [], phase: 0 });
+    this.loadLevel(startLevel, { presses: {}, history: [], phase: 0, terrain: null });
     this.resume();
 
     if (channel.swap) showToast('Two-player test: press P to swap between ☀ Day and 🌙 Night.', 8);
@@ -316,6 +348,12 @@ export class GameController {
     // Platformer levels are the step-pad ones: you reach a generator with your
     // feet, so using it is walking into it rather than clicking it.
     this.stepPads = this.terrain.isPlatformer;
+    // …and the ones that weigh themselves: with pushable crates and growing
+    // platforms in play, "the sides match" is a moment you can walk into, so the
+    // game notices it for you instead of asking for a button press.
+    this.autoBalance = this.terrain.isPlatformer;
+    this.autoBalanceSent = false;
+    this.hud.setAutoBalance(this.autoBalance);
     this.onPad.clear();
 
     this.stands = buildGenerators(this.level, this.world.heightAt);
@@ -341,6 +379,10 @@ export class GameController {
     this.field.setCounts(counts);
     // A platform whose condition already holds at level start is simply out.
     this.terrain.setCounts(counts, false);
+    // …and if the session has already been playing this level (a peer joining
+    // mid-level, or a reset landing), its crates and arms win over the authored
+    // ones straight away.
+    if (state.terrain) this.terrain.applySnapshot(state.terrain);
     this.hud.setCounts(counts);
     this.updateUndoAvailability(state.history);
     this.walkthrough.setLevel(this.level);
@@ -353,9 +395,6 @@ export class GameController {
       if (this.intro) this.pendingIntroToast = this.level.intro;
       else showToast(this.level.intro, 9);
     }
-    // On Tutorial levels the scripted walkthrough owns all guidance, so the
-    // generic press/balance coach marks are suppressed to avoid double cues.
-    if (!this.level.tutorial && this.stands.some((s) => this.canPress(s))) this.guides.unlock('press');
     this.tutorial.onLevelWithGenerators();
     if (this.stepPads) this.tutorial.onFirstStepPad();
     if ((this.level.terrain?.platforms.length ?? 0) > 0) this.tutorial.onFirstPlatforms();
@@ -377,6 +416,7 @@ export class GameController {
       resets: 0,
       hintTaken: false,
       solved: false,
+      terrain: null,
     };
   }
 
@@ -426,6 +466,9 @@ export class GameController {
     // Extending platforms are pure functions of the counts, so reaching out and
     // pulling back in needs nothing more than this — in either play mode.
     this.terrain?.setCounts(counts);
+    // Every state message carries the session's crates and arms — a reset puts
+    // them back on their marks this way too.
+    if (state.terrain) this.terrain?.applySnapshot(state.terrain);
     this.hud.setCounts(counts);
     this.updateUndoAvailability(state.history);
 
@@ -440,11 +483,18 @@ export class GameController {
     this.hud.setTurn(this.level, state);
 
     const balanced = Object.values(counts).every((c) => c.day === c.night);
-    if (balanced && !state.solved) this.tutorial.onFirstBalanceReady();
-
-    // Reset puts the crates back on their marks too — otherwise "start over"
-    // would leave the level's climbing route already solved.
-    if (wasReset) this.terrain?.restore();
+    if (balanced && !state.solved && !this.autoBalance) this.tutorial.onFirstBalanceReady();
+    // Platformer levels weigh themselves the instant the sides match. On cycle
+    // levels the turn still has to be handed off first, so wait for the phase
+    // where Balance would have been available.
+    if (this.autoBalance && balanced && !state.solved && !canPass(this.level, state)) {
+      if (!this.autoBalanceSent) {
+        this.autoBalanceSent = true;
+        this.requestBalance();
+      }
+    } else {
+      this.autoBalanceSent = false;
+    }
 
     if (wasReset && this.iResetLast) {
       this.iResetLast = false;
@@ -489,30 +539,6 @@ export class GameController {
     const stand = this.stands.find((s) => s.def.id === genId);
     if (!stand) return null;
     const at = stand.root.position.clone().setY(stand.root.position.y + 2.4).project(this.camera);
-    if (at.z > 1 || Math.abs(at.x) > 1 || Math.abs(at.y) > 1) return null;
-    return {
-      x: ((at.x + 1) / 2) * window.innerWidth,
-      y: ((1 - at.y) / 2) * window.innerHeight,
-    };
-  }
-
-  /**
-   * Screen position of the generator the press guide points at: the nearest one
-   * this player can use, or null while it is off-screen or behind the camera.
-   */
-  private pressAnchor(): { x: number; y: number } | null {
-    let best: GeneratorStand | null = null;
-    let bestDist = Infinity;
-    for (const stand of this.stands) {
-      if (!this.canPress(stand)) continue;
-      const dist = stand.root.position.distanceTo(this.player.mesh.position);
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = stand;
-      }
-    }
-    if (!best) return null;
-    const at = best.root.position.clone().setY(best.root.position.y + 2.4).project(this.camera);
     if (at.z > 1 || Math.abs(at.x) > 1 || Math.abs(at.y) > 1) return null;
     return {
       x: ((at.x + 1) / 2) * window.innerWidth,
@@ -698,8 +724,9 @@ export class GameController {
       }
       return;
     }
-    this.myPresses++;
-    if (!this.level?.tutorial) this.guides.unlock('balance');
+    // The Balance coach mark waits for a first press — but only where there is a
+    // Balance button to point at (auto-balance levels have none).
+    if (!this.level?.tutorial && !this.autoBalance) this.guides.unlock('balance');
     this.channel.send({ t: 'press', gen: stand.def.id });
   }
 
@@ -729,13 +756,16 @@ export class GameController {
   }
 
   /**
-   * Is the player standing in this stand's glow ring? `already` widens the ring
-   * a little, so hugging the edge of a pad you are on doesn't stutter.
+   * Is the player standing in this stand's glow ring — feet and all? `already`
+   * widens both the ring and the height band a little, so hugging the edge of a
+   * pad you are on doesn't stutter.
    */
   private inPadRange(stand: GeneratorStand, already: boolean): boolean {
     const p = this.player.mesh.position;
-    // A stand on a platform must not fire from the ground underneath it.
-    if (Math.abs(this.player.groundHeight - stand.root.position.y) > STEP_PAD_BAND) return false;
+    // Your feet have to be at the base of the stand: a stand on a platform must
+    // not fire from the ground underneath it, and jumping lifts you off the pad.
+    const band = already ? STEP_PAD_BAND_RELEASE : STEP_PAD_BAND;
+    if (Math.abs(this.player.feetHeight - stand.root.position.y) > band) return false;
     const dist = Math.hypot(p.x - stand.root.position.x, p.z - stand.root.position.z);
     return dist <= (already ? STEP_PAD_RELEASE : STEP_PAD_RADIUS);
   }
@@ -802,9 +832,14 @@ export class GameController {
       }
       case 'pose':
         this.remote?.applyPose(msg.pose);
+        // The peer is a body an arm has to reckon with here too, so our
+        // prediction pauses a platform for them just as the session does.
+        this.terrain?.setPeer(bodyFromPose(msg.pose));
         break;
-      case 'boxes':
-        this.terrain?.applyRemote(msg.boxes);
+      case 'terrain':
+        // The authoritative crates and arms. Whatever we predicted since the
+        // last one slides into place rather than jumping (see `applySnapshot`).
+        this.terrain?.applySnapshot(msg.terrain);
         break;
       case 'peer-left':
         showDialog({
@@ -858,6 +893,9 @@ export class GameController {
 
     const dt = Math.min(0.05, (now - this.lastTime) / 1000);
     this.lastTime = now;
+    // Single player hosts the session in this tab, so its clock is our clock.
+    // (In a room the server runs it and its updates arrive as messages.)
+    this.channel.tick?.(dt);
     // Crates settle before the player moves, so the surface under their feet is
     // this frame's, not last frame's.
     this.terrain?.update(dt);
@@ -941,4 +979,15 @@ export class GameController {
     dismissToast();
     this.renderer.dispose();
   }
+}
+
+/**
+ * The other player's body as the terrain model sees it: a footprint the size of
+ * a character, standing at whatever height their last pose reported.
+ */
+function bodyFromPose(pose: PlayerPose): { pushBox: () => { x: number; z: number; feetY: number; half: number; height: number } } {
+  const feetY = pose.y ?? pose.jump;
+  return {
+    pushBox: () => ({ x: pose.x, z: pose.z, feetY, half: PLAYER_RADIUS, height: ACTOR_HEIGHT }),
+  };
 }

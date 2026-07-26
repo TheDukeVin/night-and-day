@@ -6,6 +6,7 @@
 // player). Cycle levels switch atmosphere as play passes between the sides.
 
 import * as THREE from 'three';
+import { GROUND_NOISE_DRAWS, groundHeight, seededRandom } from '../../../shared/ground.ts';
 import { haloTexture } from './crystals.ts';
 
 export type Atmosphere = 'sunset' | 'day' | 'night';
@@ -153,40 +154,6 @@ function lerpAtmo(out: AtmoState, a: AtmoState, b: AtmoState, t: number): void {
 
 const ATMO_FADE = 2.6; // seconds for a full atmosphere cross-fade
 
-/** Small seeded RNG (mulberry32) so terrain is procedural but repeatable. */
-export function seededRandom(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-/** Cheap value noise for gentle terrain undulation. */
-function makeNoise(rand: () => number): (x: number, z: number) => number {
-  const grid = 16;
-  const values: number[] = [];
-  for (let i = 0; i < grid * grid; i++) values.push(rand());
-  const at = (ix: number, iz: number) =>
-    values[((iz % grid) + grid) % grid * grid + (((ix % grid) + grid) % grid)];
-  return (x, z) => {
-    const ix = Math.floor(x);
-    const iz = Math.floor(z);
-    const fx = x - ix;
-    const fz = z - iz;
-    const sx = fx * fx * (3 - 2 * fx);
-    const sz = fz * fz * (3 - 2 * fz);
-    const a = at(ix, iz);
-    const b = at(ix + 1, iz);
-    const c = at(ix, iz + 1);
-    const d = at(ix + 1, iz + 1);
-    return a + (b - a) * sx + (c - a) * sz + (a - b - c + d) * sx * sz;
-  };
-}
-
 export class World {
   readonly scene: THREE.Scene;
   readonly heightAt: (x: number, z: number) => number;
@@ -219,14 +186,13 @@ export class World {
   constructor(seed: number) {
     this.scene = new THREE.Scene();
     const rand = seededRandom(seed);
-    const noise = makeNoise(rand);
 
-    // Terrain height: flat near the play area, gentle rolls further out.
-    this.heightAt = (x: number, z: number) => {
-      const d = Math.sqrt(x * x + z * z);
-      const flatten = THREE.MathUtils.smoothstep(d, 18, 60); // 0 near center -> 1 far
-      return noise(x * 0.04 + 3, z * 0.04 + 7) * 3.2 * flatten;
-    };
+    // The ground the player walks on is the SAME field the authoritative terrain
+    // simulation uses (`shared/ground.ts`) — a crate must land where it is drawn.
+    // That field draws the head of this seed's stream, so skip those numbers to
+    // leave the decorations below exactly where they have always been.
+    this.heightAt = groundHeight(seed);
+    for (let i = 0; i < GROUND_NOISE_DRAWS; i++) rand();
 
     this.buildSky();
     this.buildLights();

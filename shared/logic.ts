@@ -3,7 +3,18 @@
 import type { CrystalCounts, GameState, LevelDef, PlayerRole, Side } from './types.ts';
 
 export function initialGameState(packId: string, levelIndex: number): GameState {
-  return { packId, levelIndex, presses: {}, history: [], phase: 0, resets: 0, hintTaken: false, solved: false };
+  return {
+    packId,
+    levelIndex,
+    presses: {},
+    history: [],
+    phase: 0,
+    resets: 0,
+    hintTaken: false,
+    solved: false,
+    // Filled in by whoever owns the level's terrain (see `GameSession`).
+    terrain: null,
+  };
 }
 
 /** True for "Cycle" levels, where sides take turns and one passes to the next. */
