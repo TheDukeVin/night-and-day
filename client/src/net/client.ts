@@ -9,6 +9,13 @@ export interface GameChannel {
   send(msg: ClientMsg): void;
   onMessage: (msg: ServerMsg) => void;
   close(): void;
+  /**
+   * Hot seat only: hand the keyboard to the other player and return the role
+   * that now holds it. Present on a channel where one person plays both sides
+   * (the editor's two-player play test) and absent everywhere else, which is how
+   * the game code knows whether swapping is offered at all.
+   */
+  swap?(): PlayerRole;
 }
 
 /** Single-player: run the authoritative session in-memory as Dusk. */
@@ -30,6 +37,22 @@ export class LoopbackChannel implements GameChannel {
   }
 
   close(): void {}
+}
+
+/**
+ * Two players, one keyboard. The authoritative session runs in-memory exactly as
+ * it does for single player, but this client is Day or Night rather than Dusk —
+ * so every side rule the networked game enforces (whose generator, whose turn,
+ * whose undo) is enforced here too. Used by the editor's two-player play test to
+ * check that a level really does need both sides.
+ */
+export class HotSeatChannel extends LoopbackChannel {
+  role: PlayerRole = 'day';
+
+  swap(): PlayerRole {
+    this.role = this.role === 'day' ? 'night' : 'day';
+    return this.role;
+  }
 }
 
 /** Two-player: WebSocket to the room server. */

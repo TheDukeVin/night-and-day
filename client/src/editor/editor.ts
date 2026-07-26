@@ -14,7 +14,7 @@
 
 import { COLOR_HEX } from '../game/crystals.ts';
 import { GameController } from '../game/level.ts';
-import { LoopbackChannel } from '../net/client.ts';
+import { HotSeatChannel, LoopbackChannel } from '../net/client.ts';
 import { registerPack } from '../../../shared/packs.ts';
 import { BOX_SIZE } from '../../../shared/skyway.ts';
 import { surfaceUnder, validateLevel } from '../../../shared/validate.ts';
@@ -237,6 +237,12 @@ function toWorld(sx: number, sy: number): { x: number; z: number } {
 
 /** Level geometry is authored on whole world units — that is what reads well. */
 const snap = (v: number): number => Math.round(v);
+/**
+ * Centers land on half units: a block with an odd width sits between two grid
+ * lines, so rounding its center to a whole number would shift the block off the
+ * rectangle that was just drawn.
+ */
+const snapCenter = (v: number): number => Math.round(v * 2) / 2;
 
 // ---------- Canvas: drawing ----------
 
@@ -585,18 +591,21 @@ function onCanvasMove(e: MouseEvent): void {
 }
 
 function onCanvasUp(): void {
-  if (drag?.kind === 'draw-platform') {
-    const w = Math.abs(drag.x1 - drag.x0);
-    const d = Math.abs(drag.z1 - drag.z0);
-    const cx = (drag.x0 + drag.x1) / 2;
-    const cz = (drag.z0 + drag.z1) / 2;
+  const finished = drag;
+  // Clear first: adding redraws the canvas, and a still-live drag would leave
+  // the dashed pending rectangle painted over the platform it just became.
+  drag = null;
+  if (finished?.kind === 'draw-platform') {
+    const w = Math.abs(finished.x1 - finished.x0);
+    const d = Math.abs(finished.z1 - finished.z0);
+    const cx = (finished.x0 + finished.x1) / 2;
+    const cz = (finished.z0 + finished.z1) / 2;
     // A click without a drag still makes a usable platform.
-    if (drag.extender) addExtender(cx, cz, Math.max(2, w), Math.max(2, d));
+    if (finished.extender) addExtender(cx, cz, Math.max(2, w), Math.max(2, d));
     else addPlatform(cx, cz, Math.max(2, w), Math.max(2, d));
-  } else if (drag?.kind === 'move') {
+  } else if (finished?.kind === 'move') {
     buildPanel();
   }
-  drag = null;
 }
 
 function onCanvasWheel(e: WheelEvent): void {
@@ -700,11 +709,11 @@ function terrainIds(): string[] {
 function addPlatform(x: number, z: number, w: number, d: number): void {
   const p: PlatformDef = {
     id: nextId('p', terrainIds()),
-    x: snap(x),
-    z: snap(z),
+    x: snapCenter(x),
+    z: snapCenter(z),
     w: snap(w),
     d: snap(d),
-    y: newHeight,
+    y: Math.max(1, newHeight), // stone never sits at ground level
   };
   level().terrain!.platforms.push(p);
   selection = { kind: 'platform', id: p.id };
@@ -715,8 +724,8 @@ function addExtender(x: number, z: number, w: number, d: number): void {
   const lv = level();
   const e: ExtendingPlatformDef = {
     id: nextId('e', terrainIds()),
-    x: snap(x),
-    z: snap(z),
+    x: snapCenter(x),
+    z: snapCenter(z),
     w: snap(w),
     d: snap(d),
     y: newHeight,
@@ -916,8 +925,11 @@ function sectionTools(): HTMLElement {
       }, tool === id ? 'editor-tool active' : 'editor-tool')
     );
   }
+  // Only an extending platform may sit flush with the floor; stone at y=0 would
+  // just be buried in it.
+  const minHeight = tool === 'extender' ? 0 : 1;
   const options: HTMLElement[] = [
-    labeled('New platform height', numInput(newHeight, (v) => { newHeight = Math.max(1, v); }, 1, 1)),
+    labeled('New platform height', numInput(newHeight, (v) => { newHeight = Math.max(minHeight, v); }, 1, minHeight)),
     labeled('New generator side', select<Side>(['day', 'night'], newSide, (v) => { newSide = v; })),
   ];
   if (tool === 'extender') {
@@ -1048,7 +1060,8 @@ function sectionSelection(): HTMLElement {
         labeled('width', numInput(e.w, (v) => { e.w = Math.max(1, v); changed(); }, 1, 1)),
         labeled('depth', numInput(e.d, (v) => { e.d = Math.max(1, v); changed(); }, 1, 1)),
       ]),
-      labeled('height', numInput(e.y, (v) => { e.y = Math.max(1, v); changed(); }, 1, 1)),
+      // 0 is fine here: an extending platform may sit flush with the floor.
+      labeled('height', numInput(e.y, (v) => { e.y = Math.max(0, v); changed(); }, 1, 0)),
       labeled('extends', select(ALL_DIRECTIONS, e.dir, (v) => { e.dir = v; changed(); }, (v) => DIRECTION_LABEL[v])),
       labeled('reach', numInput(e.length, (v) => { e.length = Math.max(1, v); changed(); }, 1, 1)),
       el('h4', { text: 'Reaches out while…' }),
@@ -1161,7 +1174,8 @@ function sectionActions(): HTMLElement {
   });
 
   return section('Finish', [
-    button('▶ Play test this level', playTest, 'editor-btn primary'),
+    button('▶ Play test this level', () => playTest(false), 'editor-btn primary'),
+    button('▶▶ Two-player test (P swaps sides)', () => playTest(true), 'editor-btn'),
     button('✓ Check this level', () => {
       const { errors, warnings } = validateLevel(level());
       if (errors.length === 0 && warnings.length === 0) return status('Looks good — this level is ready.');
@@ -1201,7 +1215,12 @@ function refreshStatus(): void {
   else status(`Level ${level().index} — ${errors.length} thing${errors.length === 1 ? '' : 's'} to fix: ${errors[0]}`, true);
 }
 
-function playTest(): void {
+/**
+ * Boot the real game on the level being edited. `hotSeat` plays it as Day and
+ * Night instead of Dusk — one keyboard, P to hand it over — which is how you
+ * check that a level actually needs both sides.
+ */
+function playTest(hotSeat: boolean): void {
   const lv = structuredClone(level());
   lv.index = 1;
   registerPack({
@@ -1214,7 +1233,7 @@ function playTest(): void {
   // Step out of the way for the real game, then come back exactly as we were.
   root.remove();
   const game = new GameController(
-    new LoopbackChannel(DRAFT_PACK_ID, 1),
+    hotSeat ? new HotSeatChannel(DRAFT_PACK_ID, 1) : new LoopbackChannel(DRAFT_PACK_ID, 1),
     () => {
       clearUI();
       uiRoot().append(root);

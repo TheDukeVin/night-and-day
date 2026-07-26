@@ -119,6 +119,12 @@ export class Hud {
     this.setBusy(this.busy);
   }
 
+  /** Hot seat: the keyboard changed hands. Callers re-run `setTurn` after this. */
+  setRole(role: PlayerRole): void {
+    this.role = role;
+    this.roleLabel.textContent = ROLE_LABEL[role];
+  }
+
   setLevel(level: LevelDef): void {
     this.levelLabel.textContent = `Level ${level.index}: ${level.name} — ${level.concept}`;
     this.countBoard.replaceChildren();
