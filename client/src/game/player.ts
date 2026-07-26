@@ -4,10 +4,9 @@
 import * as THREE from 'three';
 import type { PlayerPose, PlayerRole } from '../../../shared/types.ts';
 import { getSettings } from '../settings.ts';
-import { ACTOR_HEIGHT, STEP_UP, type PushBox, type Pushable, type Terrain } from './platforms.ts';
-
-/** Player's horizontal footprint, used when pushing out of solid pedestals. */
-const PLAYER_RADIUS = 0.5;
+import { ACTOR_HEIGHT, PLAYER_RADIUS, STEP_UP } from '../../../shared/terrain.ts';
+import type { PushBox, TerrainBody } from '../../../shared/terrain.ts';
+import type { Terrain } from './platforms.ts';
 
 /**
  * Jump tuning. `JUMP_SPEED²/(2·GRAVITY)` is the apex — about 2.4 — which is what
@@ -98,7 +97,7 @@ export function restyleCharacter(group: THREE.Group, role: PlayerRole): void {
   for (const child of [...buildCharacterMesh(role).children]) group.add(child);
 }
 
-export class Player implements Pushable {
+export class Player implements TerrainBody {
   readonly mesh: THREE.Group;
   role: PlayerRole;
   yaw = 0; // facing direction
@@ -263,7 +262,7 @@ export class Player implements Pushable {
   }
 
   /** Physics height of the feet, without the walk/idle bob. */
-  get groundHeight(): number {
+  get feetHeight(): number {
     return this.feetY;
   }
   private onKeyUp = (e: KeyboardEvent) => this.keys.delete(e.code);

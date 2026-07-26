@@ -5,6 +5,7 @@
 // game runs, so what you see here is what players see.
 
 import * as THREE from 'three';
+import { WORLD_SEED } from '../../../shared/ground.ts';
 import { DEFAULT_PACK_ID, getPack } from '../../../shared/packs.ts';
 import { getSettings, pixelRatioFor } from '../settings.ts';
 import { el, uiRoot } from '../screens/ui.ts';
@@ -25,7 +26,7 @@ export function runCutscene(packName = getPack(DEFAULT_PACK_ID).name): void {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
 
   const camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 2000);
-  const world = new World(20260719);
+  const world = new World(WORLD_SEED);
 
   // The player is only here to supply the chase pose the intro settles onto; it
   // never takes control, so its input stays disabled for the whole loop.
