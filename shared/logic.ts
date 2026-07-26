@@ -2,8 +2,8 @@
 
 import type { CrystalCounts, GameState, LevelDef, PlayerRole, Side } from './types.ts';
 
-export function initialGameState(levelIndex: number): GameState {
-  return { levelIndex, presses: {}, history: [], phase: 0, resets: 0, hintTaken: false, solved: false };
+export function initialGameState(packId: string, levelIndex: number): GameState {
+  return { packId, levelIndex, presses: {}, history: [], phase: 0, resets: 0, hintTaken: false, solved: false };
 }
 
 /** True for "Cycle" levels, where sides take turns and one passes to the next. */

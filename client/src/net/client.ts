@@ -17,8 +17,8 @@ export class LoopbackChannel implements GameChannel {
   onMessage: (msg: ServerMsg) => void = () => {};
   private session = new GameSession();
 
-  constructor(startLevel = 1) {
-    this.session.startLevel(startLevel);
+  constructor(packId: string, startLevel = 1) {
+    this.session.startLevel(packId, startLevel);
   }
 
   send(msg: ClientMsg): void {

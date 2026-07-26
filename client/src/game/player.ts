@@ -4,9 +4,30 @@
 import * as THREE from 'three';
 import type { PlayerPose, PlayerRole } from '../../../shared/types.ts';
 import { getSettings } from '../settings.ts';
+import { STEP_UP, type Terrain } from './platforms.ts';
 
 /** Player's horizontal footprint, used when pushing out of solid pedestals. */
 const PLAYER_RADIUS = 0.5;
+
+/**
+ * Jump tuning. `JUMP_SPEED²/(2·GRAVITY)` is the apex — about 2.4 — which is what
+ * the Skyway pack's heights are built around: you can always hop a 2-unit step
+ * (one crate, or one platform tier) but never two.
+ */
+const JUMP_SPEED = 10.8;
+const GRAVITY = 24;
+
+/** A solid a character is pushed out of: a vertical cylinder over a height band. */
+export interface Collider {
+  x: number;
+  z: number;
+  radius: number;
+  /** Base height; the collider only applies to actors standing near it. */
+  y: number;
+}
+
+/** How far above/below a collider's base an actor still bumps into it. */
+const COLLIDER_BAND = 2.5;
 
 const ROLE_STYLE: Record<PlayerRole, { body: number; accent: number; emissive: number }> = {
   day: { body: 0xffc776, accent: 0xfff3e2, emissive: 0x8a5a1a },
@@ -75,7 +96,9 @@ export class Player {
   /** Total camera rotation so far, radians; tells us mouse-look has clicked. */
   turned = 0;
   /** Solid pedestals to slide around (crystals are pass-through). */
-  private colliders: { x: number; z: number; radius: number }[] = [];
+  private colliders: Collider[] = [];
+  /** Skyway levels: platforms to stand on and crates to push. */
+  private terrain: Terrain | null = null;
   private velocity = new THREE.Vector3();
   private keys = new Set<string>();
   private cameraYaw = 0;
@@ -83,9 +106,10 @@ export class Player {
   private cameraDist = 9;
   private bobTime = 0;
   private dragging = false;
-  private jumpOffset = 0;
-  private jumpVelocity = 0;
-  private airborne = false;
+  /** Physics height of the feet (the idle/walk bob is applied on top for display). */
+  private feetY = 0;
+  private vy = 0;
+  private grounded = true;
 
   constructor(
     role: PlayerRole,
@@ -135,14 +159,35 @@ export class Player {
    * player is pushed out of; only the generator's stone counts — the floating
    * crystals and cage stay pass-through.
    */
-  setColliders(colliders: { x: number; z: number; radius: number }[]): void {
+  setColliders(colliders: Collider[]): void {
     this.colliders = colliders;
+  }
+
+  /** Attach (or clear) the level's platforms and pushable crates. */
+  setTerrain(terrain: Terrain | null): void {
+    this.terrain = terrain;
+  }
+
+  /** Move the player to a level's start position, dropping them onto the ground. */
+  placeAt(x: number, z: number): void {
+    this.mesh.position.set(x, 0, z);
+    this.feetY = this.surfaceAt(x, z, Infinity);
+    this.vy = 0;
+    this.grounded = true;
+    this.mesh.position.y = this.feetY;
+  }
+
+  /** Highest surface at (x, z) reachable from feet at `feetY` — terrain or platform. */
+  private surfaceAt(x: number, z: number, feetY: number): number {
+    return this.terrain ? this.terrain.supportAt(x, z, feetY) : this.heightAt(x, z);
   }
 
   /** Slide the player out of any pedestal it has walked into (horizontal only). */
   private resolveCollisions(): void {
     const p = this.mesh.position;
     for (const c of this.colliders) {
+      // A generator up on a platform must not wall off the ground below it.
+      if (Math.abs(this.feetY - c.y) > COLLIDER_BAND) continue;
       const dx = p.x - c.x;
       const dz = p.z - c.z;
       const min = c.radius + PLAYER_RADIUS;
@@ -213,6 +258,10 @@ export class Player {
 
     // Push back out of any pedestal we've stepped into.
     this.resolveCollisions();
+    // Then out of platform walls — and this is where crates get shoved. Only a
+    // grounded player pushes: shoving a crate from mid-air would let you nudge
+    // one you are standing beside but not actually leaning into.
+    this.terrain?.resolve(this.mesh.position, PLAYER_RADIUS, this.feetY, this.grounded);
 
     // Keep inside the world.
     const maxDist = 200;
@@ -224,24 +273,33 @@ export class Player {
 
     // Held Space re-launches the moment we touch down, so you keep bouncing for
     // as long as it's down no matter what else is being pressed.
-    if (held('Space') && !this.airborne) {
-      this.airborne = true;
-      this.jumpVelocity = 8.5;
+    if (held('Space') && this.grounded) {
+      this.vy = JUMP_SPEED;
+      this.grounded = false;
     }
 
-    const groundY = this.heightAt(this.mesh.position.x, this.mesh.position.z);
-    if (this.airborne) {
-      this.jumpVelocity -= 24 * dt; // gravity
-      this.jumpOffset += this.jumpVelocity * dt;
-      if (this.jumpOffset <= 0) {
-        this.jumpOffset = 0;
-        this.jumpVelocity = 0;
-        this.airborne = false;
-      }
-      this.mesh.position.y = groundY + this.jumpOffset;
+    // Vertical integration. The support test uses the feet height from BEFORE
+    // this step, so a fall can never pass through a platform: every surface we
+    // were above is still a landing candidate, and we take the highest.
+    const prevFeetY = this.feetY;
+    this.vy -= GRAVITY * dt;
+    this.feetY += this.vy * dt;
+    const support = this.surfaceAt(this.mesh.position.x, this.mesh.position.z, prevFeetY);
+    if (this.feetY <= support && this.vy <= 0) {
+      // Landing, or stepping up onto a low ledge (anything within STEP_UP).
+      this.feetY = support;
+      this.vy = 0;
+      this.grounded = true;
     } else {
+      this.grounded = false;
+    }
+
+    if (this.grounded) {
       this.bobTime += dt * (this.moving ? 9 : 2.4);
-      this.mesh.position.y = groundY + (this.moving ? Math.abs(Math.sin(this.bobTime)) * 0.12 : Math.sin(this.bobTime) * 0.04);
+      this.mesh.position.y =
+        this.feetY + (this.moving ? Math.abs(Math.sin(this.bobTime)) * 0.12 : Math.sin(this.bobTime) * 0.04);
+    } else {
+      this.mesh.position.y = this.feetY;
     }
 
     // Smoothly face movement direction.
@@ -258,7 +316,8 @@ export class Player {
     const cx = p.x + Math.sin(this.cameraYaw) * Math.cos(this.cameraPitch) * dist;
     const cz = p.z + Math.cos(this.cameraYaw) * Math.cos(this.cameraPitch) * dist;
     const cy = p.y + Math.sin(this.cameraPitch) * dist + 1.4;
-    const minY = this.heightAt(cx, cz) + 0.8;
+    // Keep the camera above whatever it is over — the terrain, or a platform.
+    const minY = this.surfaceAt(cx, cz, cy) + 0.8;
     return {
       pos: new THREE.Vector3(cx, Math.max(cy, minY), cz),
       look: new THREE.Vector3(p.x, p.y + 1.6, p.z),
@@ -279,7 +338,16 @@ export class Player {
   }
 
   getPose(): PlayerPose {
-    return { x: this.mesh.position.x, z: this.mesh.position.z, ry: this.yaw, moving: this.moving, jump: this.jumpOffset };
+    return {
+      x: this.mesh.position.x,
+      z: this.mesh.position.z,
+      ry: this.yaw,
+      moving: this.moving,
+      // `jump` stays height-above-terrain for older peers; `y` is what a client
+      // that knows about platforms actually uses.
+      jump: Math.max(0, this.feetY - this.heightAt(this.mesh.position.x, this.mesh.position.z)),
+      y: this.feetY,
+    };
   }
 }
 
@@ -291,6 +359,9 @@ export class RemotePlayer {
   private moving = false;
   private targetJump = 0;
   private jump = 0;
+  /** Absolute height sent by a platform-aware peer, or null to fall back to `jump`. */
+  private targetY: number | null = null;
+  private y = 0;
   private bobTime = 0;
 
   constructor(role: PlayerRole, private heightAt: (x: number, z: number) => number) {
@@ -304,12 +375,29 @@ export class RemotePlayer {
     this.targetYaw = pose.ry;
     this.moving = pose.moving;
     this.targetJump = pose.jump ?? 0;
+    this.targetY = pose.y ?? null;
   }
 
   update(dt: number): void {
     this.mesh.position.x += (this.target.x - this.mesh.position.x) * Math.min(1, 10 * dt);
     this.mesh.position.z += (this.target.z - this.mesh.position.z) * Math.min(1, 10 * dt);
     const groundY = this.heightAt(this.mesh.position.x, this.mesh.position.z);
+    if (this.targetY !== null) {
+      // Platform-aware peer: follow their absolute height, and bob only while
+      // they are on a surface (i.e. not rising or falling through the air).
+      this.y += (this.targetY - this.y) * Math.min(1, 15 * dt);
+      const settled = Math.abs(this.targetY - this.y) < 0.05;
+      this.bobTime += dt * (this.moving ? 9 : 2.4);
+      const bob = settled
+        ? this.moving
+          ? Math.abs(Math.sin(this.bobTime)) * 0.12
+          : Math.sin(this.bobTime) * 0.04
+        : 0;
+      this.mesh.position.y = this.y + bob;
+      const target = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, this.targetYaw, 0));
+      this.mesh.quaternion.slerp(target, 1 - Math.exp(-10 * dt));
+      return;
+    }
     this.jump += (this.targetJump - this.jump) * Math.min(1, 15 * dt);
     if (this.jump > 0.02) {
       this.mesh.position.y = groundY + this.jump;

@@ -2,7 +2,7 @@
 // and the client-side loopback channel (single-player). Processes client
 // messages and returns the server messages to deliver.
 
-import { getLevel, LEVEL_COUNT } from './levels.ts';
+import { DEFAULT_PACK_ID, getLevel, hasPack, levelCount } from './packs.ts';
 import {
   activeSide,
   applyPass,
@@ -19,17 +19,22 @@ import {
 import type { ClientMsg, GameState, PlayerRole, ServerMsg } from './types.ts';
 
 export class GameSession {
-  state: GameState = initialGameState(1);
+  state: GameState = initialGameState(DEFAULT_PACK_ID, 1);
 
-  /** Restart the session at the given level (clamped to the pack). */
-  startLevel(index: number): void {
-    const clamped = Math.min(Math.max(1, Math.floor(index)), LEVEL_COUNT);
-    this.state = initialGameState(clamped);
+  /**
+   * Restart the session at the given pack + level. Both come from a client, so
+   * both are sanitised here: an unknown pack falls back to the default one, and
+   * the level is clamped to that pack's length.
+   */
+  startLevel(packId: string, index: number): void {
+    const pack = hasPack(packId) ? packId : DEFAULT_PACK_ID;
+    const clamped = Math.min(Math.max(1, Math.floor(index)), levelCount(pack));
+    this.state = initialGameState(pack, clamped);
   }
 
   /** Handle a message from `role`; returns messages for everyone in the room. */
   handle(role: PlayerRole, msg: ClientMsg): ServerMsg[] {
-    const level = getLevel(this.state.levelIndex);
+    const level = getLevel(this.state.packId, this.state.levelIndex);
     switch (msg.t) {
       case 'press': {
         if (this.state.solved) return [];
@@ -86,8 +91,8 @@ export class GameSession {
       }
       case 'next': {
         if (!this.state.solved) return [];
-        const nextIndex = Math.min(this.state.levelIndex + 1, LEVEL_COUNT);
-        this.state = initialGameState(nextIndex);
+        const nextIndex = Math.min(this.state.levelIndex + 1, levelCount(this.state.packId));
+        this.state = initialGameState(this.state.packId, nextIndex);
         return [{ t: 'state', state: this.state }];
       }
       default:

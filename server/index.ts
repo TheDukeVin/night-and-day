@@ -152,14 +152,25 @@ wss.on('connection', (ws) => {
       }
       case 'begin': {
         if (!room || room.players.size < 2 || role !== 'day') return;
-        room.session.startLevel(msg.level);
+        room.session.startLevel(msg.pack, msg.level);
         room.started = true;
-        broadcast(room, { t: 'begin', level: room.session.state.levelIndex, intro: msg.intro });
+        broadcast(room, {
+          t: 'begin',
+          pack: room.session.state.packId,
+          level: room.session.state.levelIndex,
+          intro: msg.intro,
+        });
         broadcast(room, { t: 'state', state: room.session.state });
         break;
       }
       case 'pose': {
         if (room) broadcast(room, { t: 'pose', pose: msg.pose }, ws);
+        break;
+      }
+      // Crates are traversal scenery, not game state (they never change the
+      // balance math), so — like `pose` — they are simply relayed to the peer.
+      case 'boxes': {
+        if (room) broadcast(room, { t: 'boxes', boxes: msg.boxes }, ws);
         break;
       }
       case 'unlocked': {

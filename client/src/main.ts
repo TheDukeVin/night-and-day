@@ -5,7 +5,7 @@ import './style.css';
 import { GameController } from './game/level.ts';
 import { runCutscene } from './game/cutscene.ts';
 import { LoopbackChannel, SocketChannel, type GameChannel } from './net/client.ts';
-import { LEVEL_COUNT, STARTER_LEVELS, STARTER_PACK_ID, STARTER_PACK_NAME } from '../../shared/levels.ts';
+import { allPacks, getPack, type PackDef } from '../../shared/packs.ts';
 import type { ServerMsg } from '../../shared/types.ts';
 import { button, clearUI, el, showDialog, uiRoot } from './screens/ui.ts';
 import { buildSettingsPanel } from './screens/settingsPanel.ts';
@@ -24,6 +24,8 @@ import { configureMechanics } from './mechanics.ts';
 
 let game: GameController | null = null;
 let currentUser: AuthUser | null = null;
+/** The pack the player picked; every screen below pack-select works within it. */
+let pack: PackDef = allPacks()[0];
 
 function screen(children: HTMLElement[], transparent = false): void {
   clearUI();
@@ -145,7 +147,12 @@ function packCard(name: string, desc: string, enabled: boolean, onClick?: () => 
 function showPackSelect(): void {
   screen([
     el('h2', { text: 'Choose a Pack' }),
-    packCard('⭐ Starter', '40 levels — counting, adding, groups, and taking turns', true, showModeSelect),
+    ...allPacks().map((p) =>
+      packCard(`${p.icon} ${p.name.replace(/ Pack$/, '')}`, p.description, true, () => {
+        pack = p;
+        showModeSelect();
+      })
+    ),
     packCard('🔢 Fractions', 'Coming soon', false),
     packCard('📐 Geometry', 'Coming soon', false),
     button('← Back', showTitle, 'menu-btn small back-link'),
@@ -158,7 +165,7 @@ function showModeSelect(): void {
   screen([
     el('h2', { text: 'How do you want to play?' }),
     button('🌗 Single Player', () =>
-      showLevelSelect(startSinglePlayer, showModeSelect, getUnlockedLevels(STARTER_PACK_ID, LEVEL_COUNT))
+      showLevelSelect(startSinglePlayer, showModeSelect, getUnlockedLevels(pack.id, pack.levels.length))
     ),
     button('☀🌙 Two Players', showRoomChoice),
     button('← Back', showPackSelect, 'menu-btn small back-link'),
@@ -169,7 +176,7 @@ function showModeSelect(): void {
 
 function levelGrid(onPick: (level: number) => void, unlocked: Set<number>): HTMLDivElement {
   const grid = el('div', { className: 'level-grid' }) as HTMLDivElement;
-  for (const level of STARTER_LEVELS) {
+  for (const level of pack.levels) {
     const isUnlocked = unlocked.has(level.index);
     const card = el('button', { className: isUnlocked ? 'level-card' : 'level-card locked' }, [
       el('div', { className: 'level-num', text: String(level.index) }),
@@ -236,14 +243,14 @@ function showLobby(room: string, isHost: boolean, channel: SocketChannel): void 
   };
   screen([
     el('h2', { text: `Room: ${room}` }),
-    el('div', { className: 'subtitle', text: `You are ${channel.role === 'day' ? 'Day ☀' : 'Night 🌙'}` }),
+    el('div', { className: 'subtitle', text: `${pack.icon} ${pack.name} — you are ${channel.role === 'day' ? 'Day ☀' : 'Night 🌙'}` }),
     status,
     levelArea,
     button('← Leave', leave, 'menu-btn small back-link'),
   ]);
 
   if (!isHost) {
-    channel.send({ t: 'unlocked', levels: [...getUnlockedLevels(STARTER_PACK_ID, LEVEL_COUNT)] });
+    channel.send({ t: 'unlocked', levels: [...getUnlockedLevels(pack.id, pack.levels.length)] });
   }
 
   channel.onMessage = (msg: ServerMsg) => {
@@ -252,11 +259,15 @@ function showLobby(room: string, isHost: boolean, channel: SocketChannel): void 
     } else if (msg.t === 'unlocked') {
       if (!isHost) return;
       status.textContent = 'Choose a level:';
-      const union = new Set(unionUnlocked(getUnlockedLevels(STARTER_PACK_ID, LEVEL_COUNT), msg.levels));
+      const union = new Set(unionUnlocked(getUnlockedLevels(pack.id, pack.levels.length), msg.levels));
       // Welcome the pair into the pack if it is new to either of them.
-      const intro = isNewToPack(STARTER_PACK_ID) || isNewFromUnlocked(msg.levels);
-      levelArea.replaceChildren(levelGrid((level) => channel.send({ t: 'begin', level, intro }), union));
+      const intro = isNewToPack(pack.id) || isNewFromUnlocked(msg.levels);
+      levelArea.replaceChildren(
+        levelGrid((level) => channel.send({ t: 'begin', pack: pack.id, level, intro }), union)
+      );
     } else if (msg.t === 'begin') {
+      // The host chose the pack; follow them into it.
+      pack = getPack(msg.pack);
       startGame(channel, msg.level, msg.intro === true);
     } else if (msg.t === 'peer-left') {
       status.textContent = 'The other player left…';
@@ -283,7 +294,7 @@ function startTwoPlayer(kind: 'create' | 'join', room: string, onError: (m: stri
 }
 
 function startSinglePlayer(level: number): void {
-  startGame(new LoopbackChannel(level), level, isNewToPack(STARTER_PACK_ID));
+  startGame(new LoopbackChannel(pack.id, level), level, isNewToPack(pack.id));
 }
 
 function enterFullscreen(): void {
@@ -303,9 +314,10 @@ function startGame(channel: GameChannel, startLevel: number, playIntro = false):
       game = null;
       showTitle();
     },
+    pack.id,
     startLevel,
-    (levelIndex) => markLevelComplete(STARTER_PACK_ID, levelIndex),
-    playIntro ? STARTER_PACK_NAME : undefined
+    (levelIndex) => markLevelComplete(pack.id, levelIndex),
+    playIntro ? pack.name : undefined
   );
 }
 
@@ -333,10 +345,15 @@ function showCredits(): void {
   ]);
 }
 
-// `/cutscene` is a standalone viewer that just loops the opening cutscene —
-// handy for watching the animation without starting a game.
-if (window.location.pathname.replace(/\/+$/, '') === '/cutscene') {
+// A couple of standalone tools live on their own paths (the server's SPA
+// fallback and Vite both serve index.html for these, so no extra HTML entry is
+// needed): `/cutscene` loops the opening animation, and `/editor` is the level
+// editor for building new platformer levels.
+const path = window.location.pathname.replace(/\/+$/, '');
+if (path === '/cutscene') {
   runCutscene();
+} else if (path === '/editor') {
+  import('./editor/editor.ts').then((m) => m.runEditor());
 } else {
   boot();
 }

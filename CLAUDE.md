@@ -42,6 +42,16 @@ production the WebSocket is same-origin on :8787. Stop stray servers with
   (`shared/logic.ts`) and the authoritative `GameSession` (`shared/session.ts`)
   are used by BOTH the server (2-player) and the client's `LoopbackChannel`
   (single-player). Never fork game logic into client- or server-only code.
+- **Packs go through the registry in `shared/packs.ts`** — never import a level
+  array directly. `getLevel(packId, index)` / `levelCount(packId)` are the only
+  lookups; `GameState.packId` and the `begin` message carry the pack, and the
+  server sanitises an unknown id back to `DEFAULT_PACK_ID`. Two packs ship today:
+  **Starter** (`shared/levels.ts`, 40 levels) and **Skyway** (`shared/skyway.ts`,
+  the platformer). `registerPack` adds one at runtime — that is how the editor's
+  play test works.
+- **Level rules live in `shared/validate.ts`** (`validateLevel` → errors +
+  warnings). `npm run verify-levels` and the in-browser editor both call it, so
+  there is exactly one definition of a valid level.
 - **Game state is minimal by design**: level index + per-generator press counts.
   Crystal counts are always *derived* via `currentCounts()`. Keep it that way —
   it's what makes networking, hints, and reset trivial.
@@ -81,8 +91,28 @@ production the WebSocket is same-origin on :8787. Stop stray servers with
   drifting near the player; **day** = bright sky with a sun that arcs so shadows
   sweep across the ground; **sunset** = the original dusk look for Sunset levels.
   It cross-fades on each pass. `GeneratorStand.setActive` dims/undims a pedestal.
+- **Platformer levels (the Skyway pack)** add an optional `terrain` field to
+  `LevelDef` (stone `platforms`, pushable `boxes`, a `spawn`) and an `at` position
+  on each `GeneratorDef`. The math is untouched — terrain only changes how you
+  *reach* a generator — so a platformer level is verified by exactly the same
+  balance rules as any other. `client/src/game/platforms.ts` owns both the meshes
+  and the collision model together, because they must agree exactly:
+  - Platforms are axis-aligned blocks, solid from the top face down (you go
+    around or jump on top, never underneath). Crates are `BOX_SIZE` cubes that
+    slide along ONE world axis and **never rotate** — pushing changes position
+    only. Anything within `STEP_UP` of your feet is stepped onto for free.
+  - `Player` does real vertical physics (`feetY`/`vy`/`grounded`); its jump apex
+    (`JUMP_SPEED²/2·GRAVITY` ≈ 2.4) is what the pack's heights are built around —
+    a 2-unit step is always reachable, 4 needs a crate. Generator colliders carry
+    a `y` so a stand on a platform doesn't wall off the ground below it.
+  - Crates are **not** in `GameState`: they never affect the balance math, so in
+    2-player they are relayed to the peer like `pose` (the `boxes` message) by
+    whoever pushed them, and `reset` restores them from the level def. `PlayerPose`
+    gained `y` so a peer up on a platform is drawn at the right height.
 - Client screens are plain DOM overlays (`client/src/screens/`, styled by
-  `client/src/style.css`); the 3D scene lives in `client/src/game/`. UI text
+  `client/src/style.css`); the 3D scene lives in `client/src/game/`. Two extra
+  pages hang off a path check in `main.ts` (no separate HTML entry — Vite and the
+  server's SPA fallback both serve `index.html`): `/cutscene` and `/editor`. UI text
   targets elementary-school players: hints nudge, they don't explain solutions.
 - **First-time onboarding shows each cue only on a player's FIRST encounter with
   that mechanic**, tied to the account — not the browser. The seen-set lives in
@@ -107,11 +137,13 @@ production the WebSocket is same-origin on :8787. Stop stray servers with
     frame via `pressAnchor()`); a bouncing **arrow** over the glowing Balance
     button.
   - **Text tips** (`client/src/game/tutorial.ts`, ids `role-day|role-night|goal|
-    multi-output|balance`): short toasts for what a picture can't convey — role
-    (day/night), the balance goal, multi-output. The `move`/`generator` tips were
-    intentionally removed; the visual cues teach those.
+    multi-output|balance|jump|push`): short toasts for what a picture can't convey
+    — role (day/night), the balance goal, multi-output, and the two Skyway
+    mechanics. The `move`/`generator` tips were intentionally removed; the visual
+    cues teach those.
   Both pause/resume with the intro cutscene and respect `settings.showTutorials`
-  and `prefers-reduced-motion`.
+  and `prefers-reduced-motion`. The Skyway mechanics add two text tips (`jump`,
+  `push`), fired from `buildLevel` when a level first has platforms or crates.
 - **Tutorial levels** (`tutorial: true` on `LevelDef` — sheet levels 1, 2, 14,
   15) run a *scripted* solution walkthrough (`client/src/game/walkthrough.ts`),
   separate from the once-per-account coach marks: it reads the level's stored
@@ -132,6 +164,23 @@ production the WebSocket is same-origin on :8787. Stop stray servers with
   binary assets.
 - Animations go through the tiny tween helper in `client/src/game/anim.ts`, not
   ad-hoc rAF loops.
+
+## The level editor (`/editor`)
+
+`client/src/editor/` — a top-down plan view (+x right, +z **down** the screen, so
+the bottom of the map is where players spawn) for building platformer levels:
+draw platforms, drop crates, place generators, edit the level's math, then
+**Play test** (registers a `draft` pack and boots the real `GameController`),
+**Check** (runs `validateLevel`), or **Download** the level or pack as JSON in the
+exact `LevelDef` shape `shared/skyway.ts` holds. Work autosaves to localStorage.
+
+Two invariants worth keeping:
+- Every mutation runs `resettle()`, which drops each crate and generator onto the
+  surface beneath it. A floating generator is a level the verifier rejects, so the
+  editor simply never lets that state exist.
+- `solve.ts` searches the **day−night difference** space, not press counts: one
+  press is a fixed vector on that difference, so a BFS finds the minimum-press
+  solution directly.
 
 ## Driving the app headlessly (verification)
 
