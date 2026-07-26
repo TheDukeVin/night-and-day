@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import type { PlayerPose, PlayerRole } from '../../../shared/types.ts';
-import { getSettings } from '../settings.ts';
+import { cameraMode, getSettings } from '../settings.ts';
 import { ACTOR_HEIGHT, PLAYER_RADIUS, STEP_UP } from '../../../shared/terrain.ts';
 import type { PushBox, TerrainBody } from '../../../shared/terrain.ts';
 import type { Terrain } from './platforms.ts';
@@ -269,7 +269,7 @@ export class Player implements TerrainBody {
   private onBlur = () => this.keys.clear();
   private onMouseDown = (e: MouseEvent) => {
     if (!this.controlsEnabled) return;
-    const mode = getSettings().cameraMode;
+    const mode = cameraMode();
     if (mode === 'drag' && e.button === 2) {
       this.dragging = true;
     } else if (mode === 'pointerlock' && e.button === 0 && document.pointerLockElement !== this.domElement) {

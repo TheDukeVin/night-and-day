@@ -60,6 +60,8 @@ export function showDialog(opts: {
   buttons: DialogButton[];
   winStyle?: boolean;
 }): () => void {
+  // A modal wants the cursor back — a cursor-locked player can't click a button.
+  if (document.pointerLockElement) document.exitPointerLock();
   const backdrop = el('div', { className: 'dialog-backdrop' });
   const dialog = el('div', { className: opts.winStyle ? 'dialog win' : 'dialog' });
   if (opts.title) dialog.append(el('h2', { text: opts.title }));
