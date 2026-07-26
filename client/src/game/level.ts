@@ -9,7 +9,7 @@ import type { TerrainSnapshot } from '../../../shared/terrain.ts';
 import { ACTOR_HEIGHT, PLAYER_RADIUS } from '../../../shared/terrain.ts';
 import type { GameState, LevelDef, PlayerPose, ServerMsg, Side } from '../../../shared/types.ts';
 import type { GameChannel } from '../net/client.ts';
-import { getSettings, pixelRatioFor } from '../settings.ts';
+import { cameraMode, getSettings, pixelRatioFor, setCameraModeOverride } from '../settings.ts';
 import { Hud } from '../screens/hud.ts';
 import { dismissToast, el, showDialog, showToast, uiRoot } from '../screens/ui.ts';
 import { clearTweens, updateTweens } from './anim.ts';
@@ -211,6 +211,7 @@ export class GameController {
     // would otherwise pop the menu (stealing focus and stalling key input).
     document.addEventListener('contextmenu', this.onContextMenu);
     document.addEventListener('pointerlockchange', this.onPointerLockChange);
+    document.addEventListener('fullscreenchange', this.onFullscreenChange);
     if (channel.swap) window.addEventListener('keydown', this.onKeyDown);
 
     // Debug/test handle for driving the game programmatically.
@@ -255,6 +256,8 @@ export class GameController {
     this.player.controlsEnabled = true;
     this.player.snapCamera();
     this.hud.root.style.display = '';
+    // The level asked for the cursor while the cutscene held the controls.
+    if (cameraMode() === 'pointerlock') this.lockPointer();
     // Order matches a normal level start: tips start flowing, then the level's
     // own intro takes the screen (a toast replaces whatever is showing) and the
     // remaining tips queue up behind it.
@@ -352,6 +355,11 @@ export class GameController {
     // platforms in play, "the sides match" is a moment you can walk into, so the
     // game notices it for you instead of asking for a button press.
     this.autoBalance = this.terrain.isPlatformer;
+    // Platformer levels are played cursor-locked: the mouse only steers, so grab
+    // the pointer as the level comes up. Esc gives it back (and the browser will
+    // refuse a lock we ask for without a click — a click re-takes it).
+    setCameraModeOverride(this.terrain.isPlatformer ? 'pointerlock' : null);
+    if (this.terrain.isPlatformer) this.lockPointer();
     this.autoBalanceSent = false;
     this.hud.setAutoBalance(this.autoBalance);
     this.onPad.clear();
@@ -632,6 +640,21 @@ export class GameController {
     this.crosshair.classList.toggle('visible', this.isPointerLocked());
   };
 
+  /**
+   * Going full screen re-takes the cursor: Esc is the one key that gets it back,
+   * and it drops full screen at the same time, so ⛶ is the natural way back in.
+   */
+  private onFullscreenChange = (): void => {
+    if (document.fullscreenElement && cameraMode() === 'pointerlock') this.lockPointer();
+  };
+
+  private lockPointer(): void {
+    if (this.disposed || this.intro || this.isPointerLocked()) return;
+    // Rejects when the browser wants a user gesture first — clicking the scene
+    // is always the fallback, so a refusal here is nothing to report.
+    void this.renderer.domElement.requestPointerLock()?.catch(() => {});
+  }
+
   private isPointerLocked(): boolean {
     return document.pointerLockElement === this.renderer.domElement;
   }
@@ -679,7 +702,7 @@ export class GameController {
     const locked = this.isPointerLocked();
     // In pointer-lock mode, the first click only engages the cursor lock
     // (requested by Player's mousedown handler) — it isn't a game action yet.
-    if (getSettings().cameraMode === 'pointerlock' && !locked) return;
+    if (cameraMode() === 'pointerlock' && !locked) return;
     const ndc = locked
       ? new THREE.Vector2(0, 0)
       : new THREE.Vector2(
@@ -965,7 +988,9 @@ export class GameController {
     this.renderer.domElement.removeEventListener('mouseleave', this.onMouseLeave);
     document.removeEventListener('contextmenu', this.onContextMenu);
     document.removeEventListener('pointerlockchange', this.onPointerLockChange);
+    document.removeEventListener('fullscreenchange', this.onFullscreenChange);
     window.removeEventListener('keydown', this.onKeyDown);
+    setCameraModeOverride(null);
     if (document.pointerLockElement === this.renderer.domElement) document.exitPointerLock();
     this.crosshair.remove();
     this.renderer.domElement.style.cursor = '';

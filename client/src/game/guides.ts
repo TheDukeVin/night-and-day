@@ -7,7 +7,7 @@
 // namespaced `guide-*` so they never collide with the text tips.
 
 import { el } from '../screens/ui.ts';
-import { getSettings } from '../settings.ts';
+import { cameraMode, getSettings } from '../settings.ts';
 import { hasSeenMechanic, markMechanicSeen } from '../mechanics.ts';
 
 export type GuideId = 'move' | 'look' | 'balance';
@@ -172,7 +172,7 @@ export class Guides {
         node.classList.toggle('done', w.usedKeys.has(code));
       }
     } else if (id === 'look') {
-      card.classList.toggle('locking', getSettings().cameraMode === 'pointerlock');
+      card.classList.toggle('locking', cameraMode() === 'pointerlock');
     } else if (id === 'balance') {
       const r = this.opts.balanceButton.getBoundingClientRect();
       this.opts.balanceButton.classList.add('guide-lit');

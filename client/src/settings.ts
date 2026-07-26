@@ -32,6 +32,23 @@ export function getSettings(): Settings {
   return cached;
 }
 
+/**
+ * Some levels come with their own camera mode: the Skyway platformer is played
+ * cursor-locked, because you steer with the mouse the whole time and there is
+ * nothing to click. The level sets an override while it is loaded; everything
+ * that asks "how does the mouse look right now?" goes through `cameraMode()`
+ * rather than reading the stored setting directly.
+ */
+let cameraModeOverride: Settings['cameraMode'] | null = null;
+
+export function setCameraModeOverride(mode: Settings['cameraMode'] | null): void {
+  cameraModeOverride = mode;
+}
+
+export function cameraMode(): Settings['cameraMode'] {
+  return cameraModeOverride ?? getSettings().cameraMode;
+}
+
 export function saveSettings(patch: Partial<Settings>): Settings {
   cached = { ...getSettings(), ...patch };
   localStorage.setItem(KEY, JSON.stringify(cached));

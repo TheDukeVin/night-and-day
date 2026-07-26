@@ -4,7 +4,8 @@
 
 import * as THREE from 'three';
 import type { CrystalColor, CrystalCounts, LevelDef, Side } from '../../../shared/types.ts';
-import { easeInOut, easeOutBack, tween } from './anim.ts';
+import { cancelTween, easeInOut, easeOutBack, tween } from './anim.ts';
+import type { Tween } from './anim.ts';
 import type { Atmosphere } from './world.ts';
 
 export const COLOR_HEX: Record<CrystalColor, { day: number; night: number; ui: string }> = {
@@ -95,6 +96,13 @@ interface CrystalMesh {
   burst: number;
   /** Night crystals only — drawn via the field's instanced star mesh. */
   stars: StarSpec[];
+  /**
+   * The birth animation still running: the flight from the generator's scaffold,
+   * or the pop-in scale. Held so `settle` can end it early — the balance ceremony
+   * reads crystal positions, and a crystal still on its way from a generator
+   * would fly at its partner from there.
+   */
+  anim: Tween | null;
 }
 
 interface Cluster {
@@ -380,6 +388,7 @@ export class CrystalField {
       const target = counts[cluster.color]?.[cluster.side] ?? 0;
       while (cluster.crystals.length > target) {
         const c = cluster.crystals.pop()!;
+        cancelTween(c.anim);
         this.group.remove(c.root);
       }
       const queue = queues.get(`${cluster.color}:${cluster.side}`) ?? [];
@@ -399,6 +408,7 @@ export class CrystalField {
             cluster.side === 'night'
               ? Array.from({ length: STARS_PER_CRYSTAL }, makeStarSpec)
               : [],
+          anim: null,
         };
         cluster.crystals.push(crystal);
         this.group.add(root);
@@ -409,7 +419,7 @@ export class CrystalField {
           const endQ = new THREE.Quaternion();
           root.position.copy(start);
           root.quaternion.copy(startQ);
-          tween({
+          crystal.anim = tween({
             duration: 0.75,
             delay: 0.14 * spawned,
             onUpdate: (t) => {
@@ -418,12 +428,17 @@ export class CrystalField {
               root.position.y += Math.sin(e * Math.PI) * 2.2;
               root.quaternion.slerpQuaternions(startQ, endQ, e);
             },
+            onDone: () => (crystal.anim = null),
           });
           spawned++;
         } else {
           root.position.copy(slot);
           root.scale.setScalar(0.01);
-          tween({ duration: 0.4, onUpdate: (t) => root.scale.setScalar(0.01 + easeOutBack(t) * 0.99) });
+          crystal.anim = tween({
+            duration: 0.4,
+            onUpdate: (t) => root.scale.setScalar(0.01 + easeOutBack(t) * 0.99),
+            onDone: () => (crystal.anim = null),
+          });
         }
       }
       this.drawLabel(cluster, target);
@@ -454,6 +469,43 @@ export class CrystalField {
       crystals: c.crystals.map((m) => m.root),
       center: c.center.clone(),
     }));
+  }
+
+  /**
+   * Seconds until the last birth animation lands (0 when none is running). The
+   * balance ceremony waits this out, so a crystal that was still crossing the map
+   * when the sides matched finishes its trip to the stack before the sides start
+   * flying at each other.
+   */
+  settleTime(): number {
+    let longest = 0;
+    for (const cluster of this.clusters.values()) {
+      for (const { anim } of cluster.crystals) {
+        if (!anim) continue;
+        longest = Math.max(longest, Math.max(0, anim.delay) + anim.duration - anim.elapsed);
+      }
+    }
+    return longest;
+  }
+
+  /**
+   * End every birth animation now, putting each crystal in its slot. The balance
+   * ceremony flies crystals from wherever they are, and on a level that weighs
+   * itself the match can land while the last crystals are still on their way over
+   * from the generator — settling first is what keeps them setting off from the
+   * stack instead of from the generator that made them.
+   */
+  settle(): void {
+    for (const cluster of this.clusters.values()) {
+      for (const crystal of cluster.crystals) {
+        if (!crystal.anim) continue;
+        cancelTween(crystal.anim);
+        crystal.anim = null;
+        crystal.root.position.copy(crystal.slot);
+        crystal.root.quaternion.identity();
+        crystal.root.scale.setScalar(1);
+      }
+    }
   }
 
   /** Instantly rebuild everything at its slot (after a failed balance). */
