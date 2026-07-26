@@ -94,7 +94,9 @@ function checkTerrain(level: LevelDef, errors: string[]): void {
     if (ids.has(e.id)) errors.push(`duplicate terrain id ${e.id}`);
     ids.add(e.id);
     if (e.w <= 0 || e.d <= 0) errors.push(`extending platform ${e.id} has a non-positive size`);
-    if (e.y <= 0) errors.push(`extending platform ${e.id} must float above the ground (y > 0)`);
+    // y = 0 is allowed: a slab flush with the floor, growing a bridge or a
+    // pillar straight out of the ground.
+    if (e.y < 0) errors.push(`extending platform ${e.id} cannot sit below the ground (y >= 0)`);
     if (e.length <= 0) errors.push(`extending platform ${e.id} must reach somewhere (length > 0)`);
     if (!EXTEND_DIRECTIONS.includes(e.dir)) {
       errors.push(`extending platform ${e.id} has an unknown direction ${JSON.stringify(e.dir)}`);

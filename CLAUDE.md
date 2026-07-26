@@ -106,7 +106,10 @@ production the WebSocket is same-origin on :8787. Stop stray servers with
     a 2-unit step is always reachable, 4 needs a crate. Generator colliders carry
     a `y` so a stand on a platform doesn't wall off the ground below it.
   - **Generators on these levels are step pads, not click targets.** Any level
-    with terrain sets `GameController.stepPads`: clicking generators is disabled
+    that authored a `terrain` block at all is a platformer level
+    (`Terrain.isPlatformer` — true even when the geometry is empty, so a pack
+    never switches control schemes between its own levels) and sets
+    `GameController.stepPads`: clicking generators is disabled
     entirely and `updateStepPads()` fires one press when the player walks into
     the glow ring at a stand's base (`RING_RADIUS` + the player's radius, with a
     slightly wider release radius so hugging the edge doesn't stutter, and a
@@ -126,12 +129,27 @@ production the WebSocket is same-origin on :8787. Stop stray servers with
     State is **derived** — `Terrain.setCounts(counts)` from `applyState` — so
     there is nothing to network and both players always see the same bridge; the
     growth rate is well under `STEP_UP` per frame, so a rising pillar carries
-    whoever stands on it. `validateLevel` rejects a condition the level can never
+    whoever stands on it. A **growing** arm also *shoves* whatever is in its way —
+    the local player (`Player` implements `Pushable`; `Terrain.setPlayer`) and
+    crates — along the growth axis (`inTheWay`/`clearanceOf`). Retracting never
+    shoves. If a shove would drive someone into something that isn't moving —
+    ground, wall, crate, another slab — `shovesFor` returns null and the platform
+    **holds still** (`LiveExtender.stuck`, throbbing) until they walk clear,
+    rather than squeezing them through it. Horizontal shoves keep the `STEP_UP`
+    slack (being swept onto a low ledge is just walking); a downward shove gets
+    none, because being pressed onto a floor *is* the squeeze. The pause is
+    local — a peer's client doesn't know your body is wedged and keeps growing —
+    but `reach` always eases to the same target, so the two re-converge the moment
+    you step clear. `validateLevel` rejects a condition the level can never
     reach (counts only grow from `initial`), and `surfaceUnder` deliberately
-    excludes them so nothing is ever authored resting on one. Visually: white,
-    with a direction arrow and one mini crystal per crystal the condition wants,
-    **laid out in rows of five** — the same five-across layout the crystal stacks
-    use (`COLS_PER_ROW`/`ROWS_PER_LAYER`, 5×2 per layer). The `extend` text tip
+    excludes them so nothing is ever authored resting on one. They may sit at
+    `y: 0`, **flush with the floor** (stone may not) — a flush slab's mesh is
+    nudged up by `FLUSH_LIFT` so it doesn't z-fight the terrain. Visually: white,
+    with one mini crystal per crystal the condition wants **set into the top
+    face** and **laid out in rows of five** — the same five-across layout the
+    crystal stacks use (`COLS_PER_ROW`/`ROWS_PER_LAYER`, 5×2 per layer). A `+y`
+    platform grows a pillar out of that face, so its marks ride the top of the
+    pillar (`markTopY`) instead of being swallowed. The `extend` text tip
     introduces the mechanic.
 - Client screens are plain DOM overlays (`client/src/screens/`, styled by
   `client/src/style.css`); the 3D scene lives in `client/src/game/`. Two extra
@@ -197,8 +215,17 @@ the bottom of the map is where players spawn) for building platformer levels:
 draw platforms and extending platforms, drop crates, place generators, edit the
 level's math, then
 **Play test** (registers a `draft` pack and boots the real `GameController`),
-**Check** (runs `validateLevel`), or **Download** the level or pack as JSON in the
-exact `LevelDef` shape `shared/skyway.ts` holds. Work autosaves to localStorage.
+**Two-player test**, **Check** (runs `validateLevel`), or **Download** the level or
+pack as JSON in the exact `LevelDef` shape `shared/skyway.ts` holds. Work autosaves
+to localStorage.
+
+The **two-player test** is a hot seat: `HotSeatChannel` (`client/src/net/client.ts`)
+is the loopback session played as **Day or Night** rather than Dusk, so every side
+rule the networked game enforces applies. It is the only channel with the optional
+`GameChannel.swap()`, which is how `GameController` knows to bind **P** — pressing
+it takes over the other character where it stands (`swapPlayers()`: re-skin both
+bodies, exchange positions, re-badge the HUD, re-arm step pads so taking over never
+fires a free press). No second renderer, no server, no room.
 
 Two invariants worth keeping:
 - Every mutation runs `resettle()`, which drops each crate and generator onto the

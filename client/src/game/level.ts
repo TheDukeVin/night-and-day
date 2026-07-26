@@ -69,6 +69,9 @@ export class GameController {
   /** Target level captured while the previous one's generators sink away. */
   private pendingLevel: { index: number; state: LevelBuildState } | null = null;
   private lastPresses: Record<string, number> = {};
+  /** The press history behind `lastPresses`; kept so a hot-seat swap can re-ask
+   * whose undo is available without waiting for the next state message. */
+  private lastHistory: string[] = [];
   private busy = false; // balance animation in flight
   private disposed = false;
   /** Whether the loop should keep running (false while blurred / tab hidden). */
@@ -176,6 +179,7 @@ export class GameController {
     // would otherwise pop the menu (stealing focus and stalling key input).
     document.addEventListener('contextmenu', this.onContextMenu);
     document.addEventListener('pointerlockchange', this.onPointerLockChange);
+    if (channel.swap) window.addEventListener('keydown', this.onKeyDown);
 
     // Debug/test handle for driving the game programmatically.
     (window as unknown as { __nd?: GameController }).__nd = this;
@@ -185,6 +189,8 @@ export class GameController {
     this.tutorial.onGameStart();
     this.loadLevel(startLevel, { presses: {}, history: [], phase: 0 });
     this.resume();
+
+    if (channel.swap) showToast('Two-player test: press P to swap between ☀ Day and 🌙 Night.', 8);
   }
 
   // ---------- Pack intro cutscene ----------
@@ -275,6 +281,7 @@ export class GameController {
   private buildLevel(index: number, state: LevelBuildState, animateAtmo = false): void {
     this.level = getLevel(this.packId, index);
     this.lastPresses = { ...state.presses };
+    this.lastHistory = [...state.history];
     this.phase = state.phase;
     this.busy = false;
 
@@ -293,20 +300,22 @@ export class GameController {
     // stands on one has its ground already there to rise out of.
     this.terrain = new Terrain(this.level.terrain, this.world.heightAt);
     this.levelGroup.add(this.terrain.group);
-    this.player.setTerrain(this.terrain.hasTerrain ? this.terrain : null);
+    this.player.setTerrain(this.terrain.isPlatformer ? this.terrain : null);
+    // …and the other way round: a growing platform shoves whoever is in its way.
+    this.terrain.setPlayer(this.player);
     // Classic levels share one open field, so the player keeps walking from
     // where they were. Platformer levels have hand-built geometry that the old
     // position could be standing inside, so those (and the level after one) put
     // the player back on the start mark.
-    if (this.terrain.hasTerrain || this.wasPlatformer) {
+    if (this.terrain.isPlatformer || this.wasPlatformer) {
       const spawn = this.level.terrain?.spawn ?? DEFAULT_SPAWN;
       const lane = this.channel.role === 'night' ? 3 : -3;
       this.player.placeAt(spawn.x + lane, spawn.z);
     }
-    this.wasPlatformer = this.terrain.hasTerrain;
+    this.wasPlatformer = this.terrain.isPlatformer;
     // Platformer levels are the step-pad ones: you reach a generator with your
     // feet, so using it is walking into it rather than clicking it.
-    this.stepPads = this.terrain.hasTerrain;
+    this.stepPads = this.terrain.isPlatformer;
     this.onPad.clear();
 
     this.stands = buildGenerators(this.level, this.world.heightAt);
@@ -411,6 +420,7 @@ export class GameController {
     const phaseChanged = state.phase !== this.phase;
     this.phase = state.phase;
     this.lastPresses = { ...state.presses };
+    this.lastHistory = [...state.history];
     const counts = currentCounts(this.level, state.presses);
     this.field?.setCounts(counts, spawnPoints);
     // Extending platforms are pure functions of the counts, so reaching out and
@@ -548,6 +558,50 @@ export class GameController {
     e.preventDefault();
   };
 
+  /** P hands the keyboard to the other player, on a hot-seat channel only. */
+  private onKeyDown = (e: KeyboardEvent): void => {
+    if (e.code !== 'KeyP' || e.repeat) return;
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+    this.swapPlayers();
+  };
+
+  /**
+   * Hot seat (the editor's two-player play test): take over the other character
+   * where it stands, leaving the one you were playing exactly where you left it.
+   * It is the same two bodies the networked game has — only now one keyboard
+   * drives them in turn, so a level can be tested the way two players meet it.
+   */
+  private swapPlayers(): void {
+    if (!this.channel.swap || !this.remote || this.busy || this.intro) return;
+    const mine = this.player.getPose();
+    const theirs = this.remote.mesh.position.clone();
+    const theirYaw = this.remote.mesh.rotation.y;
+
+    const role = this.channel.swap();
+    this.player.setRole(role);
+    this.player.placeAt(theirs.x, theirs.z);
+    this.player.yaw = theirYaw;
+    this.player.snapCamera();
+    this.remote.setRole(role === 'day' ? 'night' : 'day');
+    this.remote.snapTo(mine);
+
+    // Arm whatever pad the character we took over is already standing in, so
+    // stepping into their shoes never fires a free press.
+    this.onPad.clear();
+    for (const stand of this.stands) {
+      if (this.inPadRange(stand, false)) this.onPad.add(stand.def.id);
+    }
+
+    this.hud.setRole(role);
+    if (this.level) this.hud.setTurn(this.level, this.makeState(this.lastPresses, this.lastHistory));
+    this.updateUndoAvailability(this.lastHistory);
+    this.refreshActiveStands();
+    showToast(
+      role === 'day' ? 'You are ☀ Day now — press P to swap back.' : 'You are 🌙 Night now — press P to swap back.',
+      3
+    );
+  }
+
   private onPointerLockChange = (): void => {
     this.crosshair.classList.toggle('visible', this.isPointerLocked());
   };
@@ -659,16 +713,9 @@ export class GameController {
    */
   private updateStepPads(): void {
     if (!this.stepPads || !this.level) return;
-    const p = this.player.mesh.position;
-    const feet = this.player.groundHeight;
     for (const stand of this.stands) {
-      const dx = p.x - stand.root.position.x;
-      const dz = p.z - stand.root.position.z;
-      const dist = Math.hypot(dx, dz);
-      // A stand on a platform must not fire from the ground underneath it.
-      const reachable = Math.abs(feet - stand.root.position.y) <= STEP_PAD_BAND;
       const was = this.onPad.has(stand.def.id);
-      const inside = reachable && dist <= (was ? STEP_PAD_RELEASE : STEP_PAD_RADIUS);
+      const inside = this.inPadRange(stand, was);
       if (inside === was) continue;
       if (inside) {
         this.onPad.add(stand.def.id);
@@ -679,6 +726,18 @@ export class GameController {
         this.onPad.delete(stand.def.id);
       }
     }
+  }
+
+  /**
+   * Is the player standing in this stand's glow ring? `already` widens the ring
+   * a little, so hugging the edge of a pad you are on doesn't stutter.
+   */
+  private inPadRange(stand: GeneratorStand, already: boolean): boolean {
+    const p = this.player.mesh.position;
+    // A stand on a platform must not fire from the ground underneath it.
+    if (Math.abs(this.player.groundHeight - stand.root.position.y) > STEP_PAD_BAND) return false;
+    const dist = Math.hypot(p.x - stand.root.position.x, p.z - stand.root.position.z);
+    return dist <= (already ? STEP_PAD_RELEASE : STEP_PAD_RADIUS);
   }
 
   // ---------- Server messages ----------
@@ -868,6 +927,7 @@ export class GameController {
     this.renderer.domElement.removeEventListener('mouseleave', this.onMouseLeave);
     document.removeEventListener('contextmenu', this.onContextMenu);
     document.removeEventListener('pointerlockchange', this.onPointerLockChange);
+    window.removeEventListener('keydown', this.onKeyDown);
     if (document.pointerLockElement === this.renderer.domElement) document.exitPointerLock();
     this.crosshair.remove();
     this.renderer.domElement.style.cursor = '';

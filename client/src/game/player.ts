@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import type { PlayerPose, PlayerRole } from '../../../shared/types.ts';
 import { getSettings } from '../settings.ts';
-import { STEP_UP, type Terrain } from './platforms.ts';
+import { ACTOR_HEIGHT, STEP_UP, type PushBox, type Pushable, type Terrain } from './platforms.ts';
 
 /** Player's horizontal footprint, used when pushing out of solid pedestals. */
 const PLAYER_RADIUS = 0.5;
@@ -82,9 +82,25 @@ export function buildCharacterMesh(role: PlayerRole): THREE.Group {
   return group;
 }
 
-export class Player {
+/**
+ * Re-skin an existing character in another role's colors, in place: the group
+ * itself stays in the scene (and in whatever is holding a reference to it) while
+ * its parts are rebuilt. Hot-seat swapping is the only caller.
+ */
+export function restyleCharacter(group: THREE.Group, role: PlayerRole): void {
+  for (const child of [...group.children]) {
+    group.remove(child);
+    if (child instanceof THREE.Mesh) {
+      child.geometry.dispose();
+      for (const mat of Array.isArray(child.material) ? child.material : [child.material]) mat.dispose();
+    }
+  }
+  for (const child of [...buildCharacterMesh(role).children]) group.add(child);
+}
+
+export class Player implements Pushable {
   readonly mesh: THREE.Group;
-  readonly role: PlayerRole;
+  role: PlayerRole;
   yaw = 0; // facing direction
   moving = false;
   /** Off while the intro cutscene drives the camera itself. */
@@ -166,6 +182,42 @@ export class Player {
   /** Attach (or clear) the level's platforms and pushable crates. */
   setTerrain(terrain: Terrain | null): void {
     this.terrain = terrain;
+  }
+
+  /** Where an extending platform finds us: a box centred on our feet. */
+  pushBox(): PushBox {
+    return {
+      x: this.mesh.position.x,
+      z: this.mesh.position.z,
+      feetY: this.feetY,
+      half: PLAYER_RADIUS,
+      height: ACTOR_HEIGHT,
+    };
+  }
+
+  /**
+   * Shoved by a growing platform. A push upward means we are riding it, so any
+   * fall in progress is cancelled and we count as standing on it; a push
+   * downward can only ever squeeze us, so it kills any rise.
+   */
+  shove(dx: number, dy: number, dz: number): void {
+    this.mesh.position.x += dx;
+    this.mesh.position.z += dz;
+    if (dy === 0) return;
+    this.feetY += dy;
+    this.mesh.position.y = this.feetY;
+    if (dy > 0) {
+      this.vy = Math.max(this.vy, 0);
+      this.grounded = true;
+    } else {
+      this.vy = Math.min(this.vy, 0);
+    }
+  }
+
+  /** Hot seat: become the other character (their colors; the caller moves us). */
+  setRole(role: PlayerRole): void {
+    this.role = role;
+    restyleCharacter(this.mesh, role);
   }
 
   /** Move the player to a level's start position, dropping them onto the ground. */
@@ -373,6 +425,24 @@ export class RemotePlayer {
     this.mesh = buildCharacterMesh(role);
     this.mesh.position.set(role === 'night' ? 3 : -3, 0, 22);
     this.target.copy(this.mesh.position);
+  }
+
+  /** Hot seat: this body is now the other role (the player took ours over). */
+  setRole(role: PlayerRole): void {
+    restyleCharacter(this.mesh, role);
+  }
+
+  /**
+   * Hot seat: stand exactly here, right now. `applyPose` eases toward a peer's
+   * position, which would send the character we just stepped out of gliding
+   * across the level instead of staying put.
+   */
+  snapTo(pose: PlayerPose): void {
+    this.applyPose(pose);
+    this.mesh.position.set(pose.x, pose.y ?? this.heightAt(pose.x, pose.z), pose.z);
+    this.y = this.mesh.position.y;
+    this.jump = this.targetJump;
+    this.mesh.rotation.set(0, pose.ry, 0);
   }
 
   applyPose(pose: PlayerPose): void {
